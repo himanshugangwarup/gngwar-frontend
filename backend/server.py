@@ -15,14 +15,21 @@ from datetime import datetime, timezone, timedelta, date
 from typing import List, Optional, Annotated
 
 import bcrypt
+import httpx
 import jwt
 import razorpay
 from bson import ObjectId
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from apscheduler.triggers.cron import CronTrigger
 from fastapi import FastAPI, APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, BeforeValidator, field_validator
+
+try:
+    from twilio.rest import Client as TwilioClient
+except Exception:  # pragma: no cover
+    TwilioClient = None
 
 
 # ---------------------------------------------------------------------------
@@ -42,6 +49,23 @@ RAZORPAY_KEY_ID = os.environ.get("RAZORPAY_KEY_ID", "").strip()
 RAZORPAY_KEY_SECRET = os.environ.get("RAZORPAY_KEY_SECRET", "").strip()
 RAZORPAY_ENABLED = bool(RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET)
 razorpay_client = razorpay.Client(auth=(RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET)) if RAZORPAY_ENABLED else None
+
+# Twilio (SMS + WhatsApp reminders)
+TWILIO_ACCOUNT_SID = os.environ.get("TWILIO_ACCOUNT_SID", "").strip()
+TWILIO_AUTH_TOKEN = os.environ.get("TWILIO_AUTH_TOKEN", "").strip()
+TWILIO_PHONE_NUMBER = os.environ.get("TWILIO_PHONE_NUMBER", "").strip()
+TWILIO_WHATSAPP_FROM = os.environ.get("TWILIO_WHATSAPP_FROM", "").strip()
+TWILIO_CHANNEL = os.environ.get("TWILIO_CHANNEL", "whatsapp").strip().lower() or "whatsapp"
+TWILIO_ENABLED = bool(TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN and TwilioClient is not None)
+twilio_client = TwilioClient(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN) if TWILIO_ENABLED else None
+
+# Resend (weekly email digest)
+RESEND_API_KEY = os.environ.get("RESEND_API_KEY", "").strip()
+WEEKLY_REPORT_EMAIL = os.environ.get("WEEKLY_REPORT_EMAIL", "").strip()
+RESEND_ENABLED = bool(RESEND_API_KEY and WEEKLY_REPORT_EMAIL)
+
+# First-booking deal for every signed-in visitor (auto-applied, does NOT stack with referral)
+FIRST_BOOKING_DISCOUNT_PCT = 10
 
 mongo_url = os.environ["MONGO_URL"]
 client = AsyncIOMotorClient(mongo_url)
@@ -362,12 +386,18 @@ async def _maybe_award_referrer(user_id: str, booking_id: str) -> None:
 async def _compute_booking_pricing(user_doc: Optional[dict], list_price: float) -> dict:
     """Return the pricing breakdown for an authenticated user (or list_price only)."""
     discount_pct = 0
+    discount_reason = None
     credit_available = 0.0
     if user_doc:
-        # First booking + referred -> 15% off
         prior = await db[BOOKINGS_COLLECTION].count_documents({"user_id": str(user_doc["_id"])})
-        if user_doc.get("referred_by") and prior == 0:
-            discount_pct = REFERRAL_FRIEND_DISCOUNT_PCT
+        # Higher discount wins. Referral 15% > First-booking 10%.
+        if prior == 0:
+            if user_doc.get("referred_by"):
+                discount_pct = REFERRAL_FRIEND_DISCOUNT_PCT
+                discount_reason = "referral"
+            else:
+                discount_pct = FIRST_BOOKING_DISCOUNT_PCT
+                discount_reason = "first_booking"
         credit_available = float(user_doc.get("credit_balance", 0) or 0)
 
     after_discount = round(list_price * (100 - discount_pct) / 100, 2)
@@ -376,6 +406,7 @@ async def _compute_booking_pricing(user_doc: Optional[dict], list_price: float) 
     return {
         "list_price": round(float(list_price), 2),
         "discount_pct": discount_pct,
+        "discount_reason": discount_reason,
         "after_discount": after_discount,
         "credit_available": round(credit_available, 2),
         "credit_used": credit_used,
@@ -406,6 +437,7 @@ async def create_booking(body: BookingIn, request: Request):
         "price": quote["final_price"],
         "original": float(body.original),
         "discount_pct": quote["discount_pct"],
+        "discount_reason": quote.get("discount_reason"),
         "credit_used": quote["credit_used"],
         "name": body.name.strip(),
         "mobile": body.mobile,
@@ -657,8 +689,8 @@ async def run_reminder_job_now(user: dict = Depends(get_current_user)):
 async def _run_reminder_job() -> int:
     """Look up bookings scheduled for tomorrow that haven't been reminded yet, and queue reminders.
 
-    Since no SMS/WhatsApp provider is wired up yet, the "send" step just logs the payload
-    and records it in the `reminders_log` collection. Wire the actual provider later.
+    If Twilio env is configured, actually sends via SMS or WhatsApp (per TWILIO_CHANNEL).
+    Otherwise, the message is only persisted to `reminders_log` and logged to stdout.
     """
     tomorrow = (datetime.now(timezone.utc).date() + timedelta(days=1)).isoformat()
     cursor = db[BOOKINGS_COLLECTION].find({
@@ -676,28 +708,190 @@ async def _run_reminder_job() -> int:
             f"your {booking.get('service')} ({booking.get('duration')}) is scheduled for {booking.get('date')}, "
             f"{booking.get('time')}. Reply STOP to opt out."
         )
+        channel = TWILIO_CHANNEL if TWILIO_ENABLED else "sms"
         entry = {
             "_id": ObjectId(),
             "booking_id": str(booking["_id"]),
             "service": booking.get("service"),
             "date": booking.get("date"),
             "mobile": booking.get("mobile"),
-            "channel": "sms",  # provider not yet wired
+            "channel": channel,
             "status": "queued",
             "message": message,
             "created_at": datetime.now(timezone.utc),
         }
+
+        # Attempt an actual Twilio send if configured
+        send_error = None
+        if TWILIO_ENABLED and twilio_client is not None:
+            try:
+                to = booking.get("mobile", "")
+                if not to.startswith("+"):
+                    to = "+91" + to  # default to India
+                if channel == "whatsapp" and TWILIO_WHATSAPP_FROM:
+                    twilio_client.messages.create(
+                        from_=TWILIO_WHATSAPP_FROM,
+                        to=f"whatsapp:{to}",
+                        body=message,
+                    )
+                elif TWILIO_PHONE_NUMBER:
+                    twilio_client.messages.create(
+                        from_=TWILIO_PHONE_NUMBER,
+                        to=to,
+                        body=message,
+                    )
+                else:
+                    send_error = "No Twilio sender configured"
+                entry["status"] = "sent" if not send_error else "failed"
+                if not send_error:
+                    entry["sent_at"] = datetime.now(timezone.utc)
+                else:
+                    entry["error"] = send_error
+            except Exception as e:  # pragma: no cover
+                logger.exception("Twilio send failed")
+                entry["status"] = "failed"
+                entry["error"] = str(e)
+
         await db[REMINDERS_COLLECTION].insert_one(entry)
         await db[BOOKINGS_COLLECTION].update_one(
             {"_id": booking["_id"]},
-            {"$set": {"reminder_status": "queued", "reminder_queued_at": datetime.now(timezone.utc)}},
+            {"$set": {
+                "reminder_status": entry["status"],
+                "reminder_queued_at": datetime.now(timezone.utc),
+            }},
         )
-        logger.info("[reminder-scheduler] queued for booking %s → %s", booking["_id"], booking.get("mobile"))
+        logger.info("[reminder-scheduler] %s for booking %s → %s (%s)",
+                    entry["status"], booking["_id"], booking.get("mobile"), channel)
         queued += 1
     return queued
 
 
 scheduler: Optional[AsyncIOScheduler] = None
+
+
+# ---------------------------------------------------------------------------
+# Weekly report
+# ---------------------------------------------------------------------------
+async def _compute_weekly_report(days: int = 7) -> dict:
+    now = datetime.now(timezone.utc)
+    since = now - timedelta(days=days)
+    docs = await db[BOOKINGS_COLLECTION].find({"created_at": {"$gte": since}}).to_list(2000)
+
+    paid = [d for d in docs if d.get("payment_status") == "paid"]
+    revenue = round(sum(float(d.get("price", 0)) for d in paid), 2)
+    cancelled = [d for d in docs if d.get("status") == "cancelled"]
+
+    # No-shows: bookings whose date is in the past but not completed / not cancelled
+    today = now.date()
+    no_shows = []
+    for d in docs:
+        try:
+            d_date = datetime.strptime(d.get("date", ""), "%Y-%m-%d").date()
+        except Exception:
+            continue
+        if d_date < today and d.get("status") not in ("completed", "cancelled"):
+            no_shows.append(d)
+
+    # Top services
+    counts: dict = {}
+    for d in docs:
+        counts[d.get("service", "unknown")] = counts.get(d.get("service", "unknown"), 0) + 1
+    top_services = sorted(
+        [{"service": k, "count": v} for k, v in counts.items()],
+        key=lambda r: r["count"],
+        reverse=True,
+    )[:5]
+
+    return {
+        "period_days": days,
+        "range_start": since.isoformat(),
+        "range_end": now.isoformat(),
+        "total_bookings": len(docs),
+        "paid_bookings": len(paid),
+        "revenue": revenue,
+        "cancelled": len(cancelled),
+        "no_shows": len(no_shows),
+        "top_services": top_services,
+    }
+
+
+@api.get("/admin/weekly-report")
+async def weekly_report(user: dict = Depends(get_current_user)):
+    if user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Admin access only")
+    return await _compute_weekly_report()
+
+
+@api.post("/admin/weekly-report/email")
+async def send_weekly_report_email(user: dict = Depends(get_current_user)):
+    if user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Admin access only")
+    return await _send_weekly_report()
+
+
+async def _send_weekly_report() -> dict:
+    report = await _compute_weekly_report()
+    if not RESEND_ENABLED:
+        return {"sent": False, "reason": "Resend is not configured. Add RESEND_API_KEY and WEEKLY_REPORT_EMAIL to backend/.env.", "report": report}
+    html = _format_weekly_report_html(report)
+    try:
+        async with httpx.AsyncClient(timeout=15) as hc:
+            resp = await hc.post(
+                "https://api.resend.com/emails",
+                headers={
+                    "Authorization": f"Bearer {RESEND_API_KEY}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "from": "GngWar Weekly <weekly@gngwar.com>",
+                    "to": [WEEKLY_REPORT_EMAIL],
+                    "subject": f"GngWar weekly summary — {datetime.now(timezone.utc).strftime('%d %b %Y')}",
+                    "html": html,
+                },
+            )
+        resp.raise_for_status()
+    except Exception as e:  # pragma: no cover
+        logger.exception("Weekly report email failed")
+        return {"sent": False, "reason": str(e), "report": report}
+    return {"sent": True, "report": report}
+
+
+def _format_weekly_report_html(r: dict) -> str:
+    rows = "".join(
+        f"<tr><td>{s['service']}</td><td style='text-align:right'>{s['count']}</td></tr>"
+        for s in r["top_services"]
+    ) or "<tr><td colspan=2>No bookings yet</td></tr>"
+    return f"""
+    <div style='font-family:Manrope,Arial;background:#f7f6f3;padding:24px;color:#111113'>
+      <h2 style='margin:0 0 6px'>GngWar Weekly Summary</h2>
+      <p style='color:#77747a;margin:0 0 20px'>{r['range_start'][:10]} → {r['range_end'][:10]}</p>
+      <table style='width:100%;border-collapse:collapse'>
+        <tr><td>Total bookings</td><td style='text-align:right'><b>{r['total_bookings']}</b></td></tr>
+        <tr><td>Paid</td><td style='text-align:right'><b style='color:#207a44'>{r['paid_bookings']}</b></td></tr>
+        <tr><td>Revenue</td><td style='text-align:right'><b>₹{r['revenue']}</b></td></tr>
+        <tr><td>No-shows</td><td style='text-align:right'>{r['no_shows']}</td></tr>
+        <tr><td>Cancelled</td><td style='text-align:right'>{r['cancelled']}</td></tr>
+      </table>
+      <h3 style='margin:22px 0 6px'>Top services</h3>
+      <table style='width:100%;border-collapse:collapse'>{rows}</table>
+    </div>
+    """
+
+
+# ---------------------------------------------------------------------------
+# Integrations status (used by frontend to hide/show features)
+# ---------------------------------------------------------------------------
+@api.get("/integrations/status")
+async def integrations_status():
+    return {
+        "razorpay": RAZORPAY_ENABLED,
+        "twilio": TWILIO_ENABLED,
+        "twilio_channel": TWILIO_CHANNEL if TWILIO_ENABLED else None,
+        "resend": RESEND_ENABLED,
+        "first_booking_discount_pct": FIRST_BOOKING_DISCOUNT_PCT,
+        "referral_friend_discount_pct": REFERRAL_FRIEND_DISCOUNT_PCT,
+        "referral_referrer_credit": REFERRAL_REFERRER_CREDIT,
+    }
 
 
 app.include_router(api)
@@ -760,13 +954,19 @@ async def on_startup():
         if updates:
             await db[USERS_COLLECTION].update_one({"_id": existing["_id"]}, {"$set": updates})
 
-    # Start reminder scheduler (hourly)
+    # Start reminder scheduler (hourly) + weekly report scheduler (Sun 06:00 UTC)
     global scheduler
     if scheduler is None:
         scheduler = AsyncIOScheduler(timezone="UTC")
         scheduler.add_job(_run_reminder_job, "interval", minutes=60, id="reminder-job", replace_existing=True)
+        scheduler.add_job(
+            _send_weekly_report,
+            CronTrigger(day_of_week="sun", hour=6, minute=0),
+            id="weekly-report",
+            replace_existing=True,
+        )
         scheduler.start()
-        logger.info("Reminder scheduler started (hourly)")
+        logger.info("Schedulers started — reminders (hourly), weekly report (Sun 06:00 UTC)")
 
 
 @app.on_event("shutdown")

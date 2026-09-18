@@ -228,7 +228,10 @@ export default function BookingModal({ selected, onClose }) {
           <div className="booking-perks" data-testid="booking-perks">
             {quote.discount_pct > 0 && (
               <span className="perk-chip" data-testid="perk-discount">
-                <Gift size={13} /> {quote.discount_pct}% first-booking discount applied
+                <Gift size={13} />
+                {quote.discount_reason === "referral"
+                  ? `${quote.discount_pct}% referral discount applied`
+                  : `${quote.discount_pct}% first-booking deal applied`}
               </span>
             )}
             {quote.credit_used > 0 && (

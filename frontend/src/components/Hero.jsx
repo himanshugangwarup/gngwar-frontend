@@ -1,4 +1,4 @@
-import { ArrowRight, Check } from "lucide-react";
+import { ArrowRight, Check, Sparkles } from "lucide-react";
 
 export default function Hero({ onBook }) {
   return (
@@ -16,6 +16,14 @@ export default function Hero({ onBook }) {
           <p className="hero-subtitle">
             Professional, reliable and affordable home services — right at your doorstep.
           </p>
+
+          <div className="first-booking-banner" data-testid="first-booking-banner">
+            <Sparkles size={14} />
+            <span>
+              <strong>10% off your first booking</strong> — auto-applied when you sign in.
+            </span>
+          </div>
+
           <div className="trust-points">
             <span><Check size={15} /> Verified Professionals</span>
             <span><Check size={15} /> Transparent Pricing</span>
