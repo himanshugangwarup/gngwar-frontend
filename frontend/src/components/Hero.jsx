@@ -1,0 +1,59 @@
+import { ArrowRight, Check, House } from "lucide-react";
+
+export default function Hero({ onBook }) {
+  return (
+    <section className="hero" id="home" data-testid="hero-section">
+      <div className="container hero-grid">
+        <div className="hero-copy">
+          <div className="eyebrow">
+            <span className="eyebrow-dot" /> TRUSTED HOME SERVICES
+          </div>
+          <h1>
+            Your Home,
+            <br />
+            <em>Our Priority.</em>
+          </h1>
+          <p className="hero-subtitle">
+            Professional, reliable and affordable home services — right at your doorstep.
+          </p>
+          <div className="trust-points">
+            <span><Check size={15} /> Verified Professionals</span>
+            <span><Check size={15} /> Transparent Pricing</span>
+            <span><Check size={15} /> Easy Booking</span>
+          </div>
+          <div className="hero-actions">
+            <button
+              className="button button-pink"
+              onClick={() => onBook()}
+              data-testid="hero-book-button"
+            >
+              Book Your Service <ArrowRight size={17} />
+            </button>
+            <a className="text-link" href="#services" data-testid="hero-services-link">
+              Explore Services <ArrowRight size={17} />
+            </a>
+          </div>
+        </div>
+
+        <div className="hero-visual" data-testid="team-image-placeholder">
+          <img
+            src="/assets/images/team-placeholder.svg"
+            alt="GngWar female service professionals — replace with the exact team photo"
+            className="team-image"
+          />
+          <div className="team-overlay">
+            <div className="placeholder-badge">
+              <span className="slot-icon"><House size={16} /></span>
+              <span>GngWar team image</span>
+            </div>
+            <strong>Replace this slot with<br />the exact team photo</strong>
+            <small>public/assets/images/team-placeholder.svg</small>
+          </div>
+          <div className="hero-caption">
+            <span className="caption-dot" /> Your home, cared for
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
