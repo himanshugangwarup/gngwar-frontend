@@ -151,3 +151,97 @@ def test_all_bookings_admin_ok():
     r = s.get(f"{API}/bookings")
     assert r.status_code == 200
     assert isinstance(r.json(), list)
+
+
+# ---- Payments (Razorpay intentionally disabled: empty keys) ----
+def test_razorpay_config_disabled():
+    r = requests.get(f"{API}/payments/razorpay/config")
+    assert r.status_code == 200
+    data = r.json()
+    assert data["enabled"] is False
+    assert data["key_id"] == ""
+
+
+def test_razorpay_order_returns_503_when_disabled():
+    # create booking first
+    b = requests.post(f"{API}/bookings", json=_booking_payload()).json()
+    r = requests.post(f"{API}/payments/razorpay/order", json={"booking_id": b["id"]})
+    assert r.status_code == 503
+    assert "not" in r.json().get("detail", "").lower()
+
+
+def test_razorpay_verify_returns_503_when_disabled():
+    r = requests.post(f"{API}/payments/razorpay/verify", json={
+        "booking_id": "507f1f77bcf86cd799439011",
+        "razorpay_order_id": "order_x",
+        "razorpay_payment_id": "pay_x",
+        "razorpay_signature": "sig_x",
+    })
+    assert r.status_code == 503
+
+
+# ---- Booking status update ----
+def _admin_session():
+    s = requests.Session()
+    r = s.post(f"{API}/auth/login", json={"email": ADMIN_EMAIL, "password": ADMIN_PASSWORD})
+    assert r.status_code == 200
+    return s
+
+
+def test_status_update_admin_all_values():
+    s = _admin_session()
+    b = requests.post(f"{API}/bookings", json=_booking_payload()).json()
+    for status_val in ["confirmed", "completed", "cancelled", "requested"]:
+        r = s.patch(f"{API}/bookings/{b['id']}/status", json={"status": status_val})
+        assert r.status_code == 200, r.text
+        assert r.json()["status"] == status_val
+
+
+def test_status_update_invalid_status_422():
+    s = _admin_session()
+    b = requests.post(f"{API}/bookings", json=_booking_payload()).json()
+    r = s.patch(f"{API}/bookings/{b['id']}/status", json={"status": "bogus"})
+    assert r.status_code == 422
+
+
+def test_status_update_invalid_id_400():
+    s = _admin_session()
+    r = s.patch(f"{API}/bookings/not-an-oid/status", json={"status": "confirmed"})
+    assert r.status_code == 400
+
+
+def test_status_update_missing_id_404():
+    s = _admin_session()
+    r = s.patch(f"{API}/bookings/507f1f77bcf86cd799439011/status", json={"status": "confirmed"})
+    assert r.status_code == 404
+
+
+def test_status_update_forbidden_for_non_admin():
+    email = _new_email()
+    s = requests.Session()
+    s.post(f"{API}/auth/register", json={"email": email, "password": "password123", "name": "C"})
+    b = requests.post(f"{API}/bookings", json=_booking_payload()).json()
+    r = s.patch(f"{API}/bookings/{b['id']}/status", json={"status": "confirmed"})
+    assert r.status_code == 403
+
+
+# ---- /bookings/me sort + new fields ----
+def test_bookings_me_sorted_and_has_payment_fields():
+    email = _new_email()
+    s = requests.Session()
+    s.post(f"{API}/auth/register", json={"email": email, "password": "password123", "name": "Sort User"})
+    ids = []
+    for _ in range(3):
+        r = s.post(f"{API}/bookings", json=_booking_payload())
+        ids.append(r.json()["id"])
+    r = s.get(f"{API}/bookings/me")
+    assert r.status_code == 200
+    lst = r.json()
+    assert len(lst) >= 3
+    # newest first — last created should be first
+    assert lst[0]["id"] == ids[-1]
+    for b in lst:
+        assert "payment_status" in b
+        assert "payment_id" in b
+        assert "razorpay_order_id" in b
+        assert b["payment_status"] == "unpaid"

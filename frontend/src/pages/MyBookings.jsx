@@ -210,12 +210,22 @@ function EmptyState({ message, ctaLabel, onClick }) {
 }
 
 function PageShell({ children, onLogout }) {
+  const { user } = useAuth();
+  const isAdmin = user && typeof user === "object" && user.role === "admin";
   return (
     <div className="site-shell" data-testid="my-bookings-page">
       <header className="navbar">
         <div className="container nav-inner">
           <Logo />
-          <div className="nav-actions">
+          <div className="nav-actions account-nav">
+            <Link to="/" className="account-nav-link" data-testid="account-nav-home">
+              Home
+            </Link>
+            {isAdmin && (
+              <Link to="/admin" className="account-nav-link" data-testid="account-nav-admin">
+                Admin
+              </Link>
+            )}
             {onLogout && (
               <button
                 className="text-link"

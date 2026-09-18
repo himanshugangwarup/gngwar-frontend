@@ -205,7 +205,13 @@ function Shell({ children, onLogout }) {
       <header className="navbar">
         <div className="container nav-inner">
           <Logo />
-          <div className="nav-actions">
+          <div className="nav-actions account-nav">
+            <Link to="/" className="account-nav-link" data-testid="admin-nav-home">
+              Home
+            </Link>
+            <Link to="/my-bookings" className="account-nav-link" data-testid="admin-nav-my-bookings">
+              My Bookings
+            </Link>
             {onLogout && (
               <button
                 className="text-link"

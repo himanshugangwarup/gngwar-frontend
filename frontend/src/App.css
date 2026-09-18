@@ -23,7 +23,10 @@
 .button-dark:disabled{background:#4a4a4d;cursor:not-allowed;transform:none}
 @media(max-width:900px){.mobile-only-link{display:block;padding:14px 0;border-bottom:1px solid var(--line);width:100%}.desktop-login{display:none}.user-pill.desktop-login{display:none}}
 
-/* User menu */
+.account-nav{display:flex;align-items:center;gap:22px}
+.account-nav-link{font-size:13px;color:#55545a;font-weight:500}
+.account-nav-link:hover{color:var(--pink-dark)}
+@media(max-width:600px){.account-nav{gap:14px}.account-nav-link{font-size:12px}}
 .user-pill{position:relative;padding:0}
 .user-pill-main{display:inline-flex;align-items:center;gap:8px;background:#ffe6ec;color:var(--pink-dark);padding:8px 14px;border-radius:30px;font-size:12px;font-weight:700;border:1px solid #f8d1da;cursor:pointer}
 .user-pill-main:hover{background:#fbd8e0}

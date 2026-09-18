@@ -1,23 +1,15 @@
 # GngWar — Product Requirements Document
 
 ## Original problem statement
-Build a modern, production-style frontend site for GngWar home services with brand colors dark charcoal / white / soft pink, sticky navbar, hero using an exact user-provided female-team photo, 12 service cards with a fixed pricing matrix + strikethrough, a booking modal that carries service/duration/price forward, and standard marketing sections (How It Works, Why, Trust, About, CTA, Contact, Footer). User later requested (Feb 2026) modular components, updated pricing values, and a real FastAPI+MongoDB backend for bookings & authentication.
+Modern home-services web app for GngWar (India). Sticky navbar, hero with the exact team image, 12 service cards with 6-duration pricing matrix, booking flow that carries service/duration/price forward, and marketing sections. Follow-up asks: modular components, updated pricing (₹75/112.50/150/225/300/450), FastAPI + MongoDB backend with JWT httpOnly-cookie auth, My Bookings page for signed-in customers, Admin Dashboard for staff, Razorpay payment integration (test mode).
 
 ## User personas
-- **Homeowner (primary)**: books cleaning / kitchen / laundry help from a phone in under 60 seconds.
-- **Registered customer**: signs in to track their bookings.
-- **Admin (GngWar staff)**: reviews all incoming bookings.
+- Homeowner (primary) — books help in under 60 seconds and pays online.
+- Registered customer — tracks upcoming + past bookings, pays for pending ones.
+- GngWar Admin — reviews all bookings, updates status, tracks revenue.
 
-## Core requirements
-- Brand: charcoal, white, soft pink accent; DM Sans + Manrope.
-- Sticky navbar, hero, quick-services strip, 12 service cards (6 durations each with strikethrough original), booking flow, marketing sections, footer.
-- Every "Book Now" opens the same booking modal; modal carries service + duration + price forward automatically.
-- FastAPI + MongoDB backend, JWT httpOnly cookie auth, bookings persisted per user.
-- Mobile-responsive down to 390 px; horizontally scrolling quick-services strip.
-- No fake stats, no invented contact info.
-
-## Pricing matrix (Feb 2026)
-| Duration | Price | Original (strike) |
+## Pricing (Feb 2026)
+| Duration | Price | Strike |
 |---|---|---|
 | 30 min | ₹75 | ₹86 |
 | 45 min | ₹112.50 | ₹129 |
@@ -27,28 +19,35 @@ Build a modern, production-style frontend site for GngWar home services with bra
 | 180 min | ₹450 | ₹518 |
 
 ## What's implemented (2026-02)
-- Modular React components under `src/components/` (Navbar, Hero, QuickStrip, Services, ServiceCard, HowItWorks, WhyGngWar, TrustBand, About, CTA, Contact, Footer, BookingModal, AuthModal, Logo).
-- Services + pricing centralized in `src/data/services.js`; formatter handles ₹112.50 decimals cleanly.
-- Auth: register/login/logout/me with bcrypt + JWT + httpOnly cookies (SameSite=None, Secure).
-- Bookings: POST creates booking (anonymous or attached to signed-in user), GET /me returns caller's history, GET / admin-only for all.
-- Admin seeded from env (`admin@gngwar.com`) on startup.
-- 11/11 backend pytest tests pass; full Playwright UI flow verified.
+- Modular React components (`src/components/*`) + routed pages (`src/pages/MyBookings.jsx`, `AdminDashboard.jsx`).
+- React Router v7 with `/`, `/my-bookings`, `/admin`.
+- Cropped team image at `/assets/images/team-crop.jpg` (auto-cropped from user's mockup — shows all 3 women, no baked-in text).
+- Auth: register/login/logout/me with bcrypt + JWT + httpOnly cookies.
+- Bookings API with `payment_status`, `payment_id`, `razorpay_order_id`, `status`.
+- Admin can PATCH `/api/bookings/{id}/status` (requested/confirmed/completed/cancelled).
+- Razorpay integration scaffolded (`/api/payments/razorpay/config|order|verify`) — currently **not configured** (empty env keys). UI gracefully hides Pay Now when disabled.
+- Admin Dashboard: stat cards (requested/confirmed/completed/paid/revenue), search, status filter, inline status update per row.
+- My Bookings: upcoming vs history, Pay Now (visible when Razorpay is configured).
+- 20/20 backend pytest tests pass (`/app/backend/tests/backend_test.py`). Full Playwright UI verified.
+
+## Test credentials
+- Admin: `admin@gngwar.com` / `Admin@GngWar2026`
+- Customer: create via UI or `user1@test.com` / `password123`
 
 ## Backlog
 ### P1 — needs user input
-- Replace hero placeholder SVG with the user's exact female-team photo.
-- Fill in real contact details (phone, email, service area, support hours).
+- **Razorpay keys**: waiting on `RAZORPAY_KEY_ID` and `RAZORPAY_KEY_SECRET` (test mode is fine to start). Drop into backend/.env and restart backend.
+- **Real contact details** (phone/email/service area).
 
-### P2 — enhancements
-- "My bookings" screen for signed-in customers.
-- Admin dashboard to list & update booking status.
-- Payment integration (Stripe / Razorpay) after booking confirmation.
+### P2
 - Password reset flow.
-- OTP verification for phone number.
-- Add pagination to `/api/bookings` and `/api/bookings/me`.
-- Optional-auth FastAPI dependency to replace manual try/except inside `create_booking`.
+- Email/SMS booking confirmation.
+- OTP mobile verification.
+- Pagination on `/api/bookings` + `/api/bookings/me`.
+- Admin: audit trail for status changes.
+- Wire `CORS_ORIGINS` env or drop the dead branch.
 
-### P3 — polish
-- Wire `CORS_ORIGINS` env if multi-origin support becomes needed (currently `FRONTEND_URL` only).
-- Rate-limit login endpoint (brute-force protection).
-- SEO metadata + Open Graph tags.
+### P3
+- SEO metadata + OG tags.
+- Rate-limit login endpoint.
+- Optional-user FastAPI dependency (replace manual try/except in `create_booking`).

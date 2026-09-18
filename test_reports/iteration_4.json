@@ -1,0 +1,28 @@
+{
+  "summary": "Iteration 4 (Razorpay-disabled build). Extended backend pytest suite from 11 to 20 tests — all pass. New tests cover: Razorpay config returns enabled=false with empty key_id, Razorpay order + verify both return 503 when disabled, PATCH /api/bookings/{id}/status handles all four statuses for admin, returns 422 for invalid status, 400 for malformed id, 404 for missing id, 403 for non-admin. /api/bookings/me confirmed to sort newest-first and expose payment_status/payment_id/razorpay_order_id fields. No regressions in prior auth/booking flows. Frontend Playwright verified: hero shows cropped team image (/assets/images/team-crop.jpg), signed-out visit to /my-bookings redirects home, signed-out /admin shows 'Admins only', register-from-modal stays on home and shows user pill, user-pill dropdown shows menu-my-bookings for customer (no menu-admin), booking from home displays booking-confirmation modal with 'call to confirm' copy and NO Pay Now button (Razorpay disabled — correct graceful fallback), /my-bookings lists the just-created booking card, non-admin at /admin sees zero admin rows, admin login exposes menu-admin, /admin renders all 5 stat cards (stat-requested/confirmed/completed/paid/revenue), admin-search-input + admin-status-filter present, 14 admin-row-<id> present, inline status change on a row persists to DB (verified by reload+refetch).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "AdminDashboard header", "issues": ["Navbar on /admin collapses to only a 'Sign out' link — user-pill dropdown with My Bookings is not accessible from admin page. Consider keeping the full user pill or adding a link back to /my-bookings."]}
+    ]
+  },
+  "test_report_links": ["/app/backend/tests/backend_test.py", "/app/test_reports/pytest/pytest_results.xml"],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py still reads CORS_ORIGINS env but ignores it (dead branch L451-454) — remove or actually honor multiple origins.",
+    "create_booking() manually calls get_current_user() and swallows HTTPException. Consider a dedicated optional_user dependency; also today an *expired/invalid* cookie is silently treated as anonymous, which is fine but worth documenting.",
+    "razorpay_client is constructed at import time; if keys are rotated the process must be restarted. Acceptable for MVP.",
+    "PATCH /bookings/{id}/status has no audit/history — future enhancement.",
+    "AdminDashboard fetches all bookings with limit 500 and no pagination — flag for scale."
+  ],
+  "updated_files": ["/app/backend/tests/backend_test.py"],
+  "success_rate": {"backend": "100% (20/20)", "frontend": "100% of tested flows"},
+  "test_credentials": "admin@gngwar.com / Admin@GngWar2026 (seeded, verified). New TEST_<uuid>@test.com customers created per run.",
+  "seed_data_creation": "Each backend test run and the UI flow create TEST_ prefixed users + Home Cleaning / Sweeping+Mopping bookings. No cleanup performed (safe — prefixed).",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "New test IDs verified: menu-my-bookings, menu-admin, navbar-user-pill (aliased user-pill-toggle), booking-confirmation, pay-now-button (absent when Razorpay disabled — correct), stat-requested/confirmed/completed/paid/revenue, admin-search-input, admin-status-filter, admin-row-<id>, admin-status-<id>, booking-card-<id>. When Razorpay is enabled later, add tests for: /order returns key_id + amount + order_id for a valid booking; /verify accepts a manually-signed HMAC and flips booking to paid+confirmed. The 401s in the console during initial page load are just /api/auth/me probing while signed-out — expected.",
+  "rca of the issue": "N/A — no failing tests."
+}
