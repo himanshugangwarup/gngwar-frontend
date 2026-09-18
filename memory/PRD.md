@@ -1,80 +1,54 @@
-# GngWar Product Requirements
+# GngWar — Product Requirements Document
 
 ## Original problem statement
-
-Build a complete, modern, production-style frontend website for GngWar, a professional doorstep home-services startup. The brand is “GngWar” with the tagline “Your Home • Our Priority”. The product must let customers discover 12 household services, select one of six durations, see exact selling and crossed-out original prices, enter booking details, and continue to a confirmation step. It must be responsive, trustworthy, clean, mobile-friendly, and structured so a backend and online payment system can be connected later. The exact female-team image was requested, but was unavailable; the user explicitly approved a clearly marked local image placeholder with no generated or substituted image. Login is hidden until a backend exists. Booking confirmation is stored in browser localStorage. Contact details must remain placeholders until real details are provided.
-
-## Architecture decisions
-
-- React frontend in `/app/frontend/src`, using reusable `ServiceCard`, `BookingModal`, and shared data arrays for services/pricing.
-- Frontend-only booking flow for the current scope; no fake backend or API was added.
-- Browser storage key `gngwar_booking` stores the validated booking summary.
-- Exact team image slot is local at `/assets/images/team-placeholder.svg`, ready to replace with the real image later.
-- Existing protected environment variables remain unchanged; no external image URL is used.
-- Visual system follows charcoal, white, soft pink, and neutral gray with responsive CSS media queries.
+Build a modern, production-style frontend site for GngWar home services with brand colors dark charcoal / white / soft pink, sticky navbar, hero using an exact user-provided female-team photo, 12 service cards with a fixed pricing matrix + strikethrough, a booking modal that carries service/duration/price forward, and standard marketing sections (How It Works, Why, Trust, About, CTA, Contact, Footer). User later requested (Feb 2026) modular components, updated pricing values, and a real FastAPI+MongoDB backend for bookings & authentication.
 
 ## User personas
+- **Homeowner (primary)**: books cleaning / kitchen / laundry help from a phone in under 60 seconds.
+- **Registered customer**: signs in to track their bookings.
+- **Admin (GngWar staff)**: reviews all incoming bookings.
 
-- Home residents who need reliable, affordable everyday household help.
-- Busy customers who want to compare durations and prices quickly on mobile.
-- Future operations/admin users who will connect real booking, support, and payment services later.
+## Core requirements
+- Brand: charcoal, white, soft pink accent; DM Sans + Manrope.
+- Sticky navbar, hero, quick-services strip, 12 service cards (6 durations each with strikethrough original), booking flow, marketing sections, footer.
+- Every "Book Now" opens the same booking modal; modal carries service + duration + price forward automatically.
+- FastAPI + MongoDB backend, JWT httpOnly cookie auth, bookings persisted per user.
+- Mobile-responsive down to 390 px; horizontally scrolling quick-services strip.
+- No fake stats, no invented contact info.
 
-## Core requirements (static)
+## Pricing matrix (Feb 2026)
+| Duration | Price | Original (strike) |
+|---|---|---|
+| 30 min | ₹75 | ₹86 |
+| 45 min | ₹112.50 | ₹129 |
+| 60 min | ₹150 | ₹173 |
+| 90 min | ₹225 | ₹259 |
+| 120 min | ₹300 | ₹345 |
+| 180 min | ₹450 | ₹518 |
 
-- Sticky navigation with Home, Services, How It Works, About Us, Contact, and Book Now; Login hidden.
-- Hero with GngWar messaging, local team image placeholder, trust points, and primary actions.
-- Scrollable quick-service strip.
-- Exactly 12 individual services, each with all six duration options and exact price pairs:
-  - 30 Minutes: ₹75 / ₹86
-  - 45 Minutes: ₹110 / ₹127
-  - 60 Minutes: ₹149 / ₹171
-  - 90 Minutes: ₹222 / ₹255
-  - 120 Minutes: ₹296 / ₹340
-  - 180 Minutes: ₹439 / ₹505
-- Booking modal automatically carries service, duration, price, and original price.
-- Booking fields: name, mobile, address, date, preferred time.
-- Incomplete bookings must not persist; complete bookings show confirmation and persist locally.
-- How It Works, Why GngWar, Trust, About, CTA, Contact, and Footer sections.
-- Responsive desktop, tablet, and mobile layouts with mobile navigation and no horizontal overflow.
-- Every interactive/critical user-facing element has a descriptive `data-testid`.
+## What's implemented (2026-02)
+- Modular React components under `src/components/` (Navbar, Hero, QuickStrip, Services, ServiceCard, HowItWorks, WhyGngWar, TrustBand, About, CTA, Contact, Footer, BookingModal, AuthModal, Logo).
+- Services + pricing centralized in `src/data/services.js`; formatter handles ₹112.50 decimals cleanly.
+- Auth: register/login/logout/me with bcrypt + JWT + httpOnly cookies (SameSite=None, Secure).
+- Bookings: POST creates booking (anonymous or attached to signed-in user), GET /me returns caller's history, GET / admin-only for all.
+- Admin seeded from env (`admin@gngwar.com`) on startup.
+- 11/11 backend pytest tests pass; full Playwright UI flow verified.
 
-## What's been implemented
+## Backlog
+### P1 — needs user input
+- Replace hero placeholder SVG with the user's exact female-team photo.
+- Fill in real contact details (phone, email, service area, support hours).
 
-### 2026-09-18
+### P2 — enhancements
+- "My bookings" screen for signed-in customers.
+- Admin dashboard to list & update booking status.
+- Payment integration (Stripe / Razorpay) after booking confirmation.
+- Password reset flow.
+- OTP verification for phone number.
+- Add pagination to `/api/bookings` and `/api/bookings/me`.
+- Optional-auth FastAPI dependency to replace manual try/except inside `create_booking`.
 
-- Replaced the starter splash screen with the complete GngWar experience.
-- Added responsive sticky navbar, hero, quick services strip, 12 service cards, filters, informational sections, CTA, contact placeholders, and footer.
-- Added exact six-option pricing UI on every service card with crossed-out original prices.
-- Added booking modal with duration-linked pricing and customer details.
-- Added explicit validation for blank and partial booking attempts.
-- Added localStorage persistence and booking confirmation summary.
-- Added local team image placeholder at `frontend/public/assets/images/team-placeholder.svg`.
-- Verified production build, desktop/mobile screenshots, booking flow, responsive menu, pricing, persistence, and validation with regression testing.
-
-## Prioritized backlog
-
-### P0 — next required product integrations
-
-- Connect booking submission to a real backend/API.
-- Replace localStorage confirmation with server-side booking records.
-- Add payment provider flow after backend booking endpoint is available.
-- Replace the placeholder asset with the exact GngWar female-team photo.
-
-### P1 — customer experience
-
-- Add real phone, support email, service locations, privacy policy, and terms content.
-- Add booking status and customer booking history.
-- Add real support/contact interaction.
-
-### P2 — growth and operations
-
-- Add backend-backed authentication when required.
-- Add admin service and availability management.
-- Add customer reviews only when real verified feedback exists.
-
-## Remaining next tasks
-
-1. Provide the exact female-team image and replace `team-placeholder.svg` without changing its local asset path contract.
-2. Provide approved business contact and service-location details.
-3. Connect the booking payload to a backend endpoint.
-4. Add online payment after booking creation is server-backed.
+### P3 — polish
+- Wire `CORS_ORIGINS` env if multi-origin support becomes needed (currently `FRONTEND_URL` only).
+- Rate-limit login endpoint (brute-force protection).
+- SEO metadata + Open Graph tags.

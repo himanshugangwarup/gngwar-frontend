@@ -1,4 +1,4 @@
-import { ArrowRight, Check, House } from "lucide-react";
+import { ArrowRight, Check } from "lucide-react";
 
 export default function Hero({ onBook }) {
   return (
@@ -41,14 +41,6 @@ export default function Hero({ onBook }) {
             alt="GngWar female service professionals — replace with the exact team photo"
             className="team-image"
           />
-          <div className="team-overlay">
-            <div className="placeholder-badge">
-              <span className="slot-icon"><House size={16} /></span>
-              <span>GngWar team image</span>
-            </div>
-            <strong>Replace this slot with<br />the exact team photo</strong>
-            <small>public/assets/images/team-placeholder.svg</small>
-          </div>
           <div className="hero-caption">
             <span className="caption-dot" /> Your home, cared for
           </div>
