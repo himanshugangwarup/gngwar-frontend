@@ -10,13 +10,15 @@ import uuid
 import re
 import hmac
 import hashlib
-from datetime import datetime, timezone, timedelta
+import secrets
+from datetime import datetime, timezone, timedelta, date
 from typing import List, Optional, Annotated
 
 import bcrypt
 import jwt
 import razorpay
 from bson import ObjectId
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from fastapi import FastAPI, APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -30,6 +32,11 @@ JWT_ALGORITHM = "HS256"
 ACCESS_TOKEN_MINUTES = 60 * 24  # 1 day (session-friendly for MVP)
 BOOKINGS_COLLECTION = "bookings"
 USERS_COLLECTION = "users"
+REMINDERS_COLLECTION = "reminders_log"
+
+# Referral program
+REFERRAL_FRIEND_DISCOUNT_PCT = 15  # First booking discount for the referred user
+REFERRAL_REFERRER_CREDIT = 150.0    # Credited to referrer when referred user's first booking is paid
 
 RAZORPAY_KEY_ID = os.environ.get("RAZORPAY_KEY_ID", "").strip()
 RAZORPAY_KEY_SECRET = os.environ.get("RAZORPAY_KEY_SECRET", "").strip()
@@ -59,6 +66,9 @@ class UserOut(BaseModel):
     email: EmailStr
     name: str
     role: str = "customer"
+    referral_code: Optional[str] = None
+    credit_balance: float = 0.0
+    referred_by_code: Optional[str] = None
     created_at: Optional[str] = None
 
 
@@ -66,6 +76,7 @@ class RegisterIn(BaseModel):
     email: EmailStr
     password: str = Field(min_length=6, max_length=128)
     name: str = Field(min_length=1, max_length=80)
+    referral_code: Optional[str] = Field(default=None, max_length=20)
 
 
 class LoginIn(BaseModel):
@@ -99,6 +110,9 @@ class BookingOut(BaseModel):
     duration: str
     price: float
     original: float
+    list_price: float = 0.0
+    discount_pct: int = 0
+    credit_used: float = 0.0
     name: str
     mobile: str
     address: str
@@ -108,6 +122,7 @@ class BookingOut(BaseModel):
     payment_status: str = "unpaid"
     payment_id: Optional[str] = None
     razorpay_order_id: Optional[str] = None
+    reminder_status: str = "pending"
     user_id: Optional[str] = None
     created_at: str
 
@@ -186,14 +201,29 @@ async def get_current_user(request: Request) -> dict:
     return user
 
 
-def serialize_user(user_doc: dict) -> UserOut:
+def _serialize_user_from_doc(doc: dict) -> UserOut:
+    referred_code = None
+    if doc.get("referred_by"):
+        # embedded referral code kept on doc for fast display
+        referred_code = doc.get("referred_by_code")
     return UserOut(
-        id=str(user_doc.get("_id") or user_doc.get("id")),
-        email=user_doc["email"],
-        name=user_doc.get("name", ""),
-        role=user_doc.get("role", "customer"),
-        created_at=(user_doc.get("created_at").isoformat() if isinstance(user_doc.get("created_at"), datetime) else user_doc.get("created_at")),
+        id=str(doc.get("_id") or doc.get("id")),
+        email=doc["email"],
+        name=doc.get("name", ""),
+        role=doc.get("role", "customer"),
+        referral_code=doc.get("referral_code"),
+        credit_balance=float(doc.get("credit_balance", 0) or 0),
+        referred_by_code=referred_code,
+        created_at=(doc.get("created_at").isoformat() if isinstance(doc.get("created_at"), datetime) else doc.get("created_at")),
     )
+
+
+def serialize_user(user_doc: dict) -> UserOut:
+    return _serialize_user_from_doc(user_doc)
+
+
+def generate_referral_code() -> str:
+    return "GNG" + secrets.token_hex(3).upper()  # e.g. GNG3F9A2C
 
 
 def set_auth_cookie(response: Response, token: str) -> None:
@@ -222,11 +252,30 @@ async def register(body: RegisterIn, response: Response):
     if existing:
         raise HTTPException(status_code=409, detail="An account with this email already exists")
 
+    # Optional referral
+    referred_by_id = None
+    referred_by_code = None
+    if body.referral_code:
+        code = body.referral_code.strip().upper()
+        referrer = await db[USERS_COLLECTION].find_one({"referral_code": code})
+        if referrer:
+            referred_by_id = str(referrer["_id"])
+            referred_by_code = code
+
+    # Unique referral code for this user
+    ref_code = generate_referral_code()
+    while await db[USERS_COLLECTION].find_one({"referral_code": ref_code}):
+        ref_code = generate_referral_code()
+
     doc = {
         "email": email,
         "name": body.name.strip(),
         "password_hash": hash_password(body.password),
         "role": "customer",
+        "referral_code": ref_code,
+        "credit_balance": 0.0,
+        "referred_by": referred_by_id,
+        "referred_by_code": referred_by_code,
         "created_at": datetime.now(timezone.utc),
     }
     result = await db[USERS_COLLECTION].insert_one(doc)
@@ -270,6 +319,9 @@ def _booking_to_out(doc: dict) -> BookingOut:
         duration=doc["duration"],
         price=float(doc["price"]),
         original=float(doc["original"]),
+        list_price=float(doc.get("list_price", doc["price"])),
+        discount_pct=int(doc.get("discount_pct", 0)),
+        credit_used=float(doc.get("credit_used", 0)),
         name=doc["name"],
         mobile=doc["mobile"],
         address=doc["address"],
@@ -279,40 +331,108 @@ def _booking_to_out(doc: dict) -> BookingOut:
         payment_status=doc.get("payment_status", "unpaid"),
         payment_id=doc.get("payment_id"),
         razorpay_order_id=doc.get("razorpay_order_id"),
+        reminder_status=doc.get("reminder_status", "pending"),
         user_id=doc.get("user_id"),
         created_at=doc["created_at"].isoformat() if isinstance(doc.get("created_at"), datetime) else doc["created_at"],
     )
+
+
+async def _maybe_award_referrer(user_id: str, booking_id: str) -> None:
+    """When a user's *first* paid booking is completed, credit their referrer ₹150."""
+    user_doc = await db[USERS_COLLECTION].find_one({"_id": ObjectId(user_id)})
+    if not user_doc or not user_doc.get("referred_by"):
+        return
+    # Check whether the referrer has already been rewarded for this user
+    if user_doc.get("first_paid_reward_at"):
+        return
+    referrer_oid = ObjectId(user_doc["referred_by"])
+    # Mark this user as having received their referral reward
+    await db[USERS_COLLECTION].update_one(
+        {"_id": user_doc["_id"], "first_paid_reward_at": {"$exists": False}},
+        {"$set": {"first_paid_reward_at": datetime.now(timezone.utc), "first_paid_booking_id": booking_id}},
+    )
+    # Credit the referrer
+    await db[USERS_COLLECTION].update_one(
+        {"_id": referrer_oid},
+        {"$inc": {"credit_balance": REFERRAL_REFERRER_CREDIT}},
+    )
+    logger.info("Referral reward: %s credited to referrer of user %s (booking %s)", REFERRAL_REFERRER_CREDIT, user_id, booking_id)
+
+
+async def _compute_booking_pricing(user_doc: Optional[dict], list_price: float) -> dict:
+    """Return the pricing breakdown for an authenticated user (or list_price only)."""
+    discount_pct = 0
+    credit_available = 0.0
+    if user_doc:
+        # First booking + referred -> 15% off
+        prior = await db[BOOKINGS_COLLECTION].count_documents({"user_id": str(user_doc["_id"])})
+        if user_doc.get("referred_by") and prior == 0:
+            discount_pct = REFERRAL_FRIEND_DISCOUNT_PCT
+        credit_available = float(user_doc.get("credit_balance", 0) or 0)
+
+    after_discount = round(list_price * (100 - discount_pct) / 100, 2)
+    credit_used = round(min(credit_available, after_discount), 2)
+    final_price = round(after_discount - credit_used, 2)
+    return {
+        "list_price": round(float(list_price), 2),
+        "discount_pct": discount_pct,
+        "after_discount": after_discount,
+        "credit_available": round(credit_available, 2),
+        "credit_used": credit_used,
+        "final_price": final_price,
+    }
 
 
 @api.post("/bookings", response_model=BookingOut, status_code=201)
 async def create_booking(body: BookingIn, request: Request):
     # Try to associate booking with logged-in user (optional)
     user_id: Optional[str] = None
+    user_doc: Optional[dict] = None
     try:
         current = await get_current_user(request)
         user_id = current["id"]
+        user_doc = await db[USERS_COLLECTION].find_one({"_id": ObjectId(user_id)})
     except HTTPException:
         user_id = None
+        user_doc = None
+
+    quote = await _compute_booking_pricing(user_doc, float(body.price))
 
     doc = {
         "_id": ObjectId(),
         "service": body.service,
         "duration": body.duration,
-        "price": float(body.price),
+        "list_price": quote["list_price"],
+        "price": quote["final_price"],
         "original": float(body.original),
+        "discount_pct": quote["discount_pct"],
+        "credit_used": quote["credit_used"],
         "name": body.name.strip(),
         "mobile": body.mobile,
         "address": body.address.strip(),
         "date": body.date,
         "time": body.time,
         "status": "requested",
-        "payment_status": "unpaid",
+        "payment_status": "unpaid" if quote["final_price"] > 0 else "paid",
         "payment_id": None,
         "razorpay_order_id": None,
+        "reminder_status": "pending",
         "user_id": user_id,
         "created_at": datetime.now(timezone.utc),
     }
     await db[BOOKINGS_COLLECTION].insert_one(doc)
+
+    # Deduct credit from user balance (if any)
+    if user_id and quote["credit_used"] > 0:
+        await db[USERS_COLLECTION].update_one(
+            {"_id": ObjectId(user_id)},
+            {"$inc": {"credit_balance": -quote["credit_used"]}},
+        )
+
+    # If price is fully covered by credit, treat as paid and reward referrer if first paid.
+    if user_id and quote["final_price"] == 0:
+        await _maybe_award_referrer(user_id, str(doc["_id"]))
+
     return _booking_to_out(doc)
 
 
@@ -439,7 +559,145 @@ async def verify_razorpay(body: RazorpayVerifyIn):
     )
     if not result:
         raise HTTPException(status_code=404, detail="Booking not found for this order")
+
+    # Trigger referral reward on first paid booking
+    if result.get("user_id"):
+        await _maybe_award_referrer(result["user_id"], str(result["_id"]))
+
     return _booking_to_out(result)
+
+
+# ---------------------------------------------------------------------------
+# Referrals + quotes
+# ---------------------------------------------------------------------------
+class QuoteIn(BaseModel):
+    price: float = Field(ge=0)
+
+
+@api.post("/bookings/quote")
+async def booking_quote(body: QuoteIn, request: Request):
+    """Compute the *effective* price for the caller (applies referral discount + credit)."""
+    user_doc: Optional[dict] = None
+    try:
+        current = await get_current_user(request)
+        user_doc = await db[USERS_COLLECTION].find_one({"_id": ObjectId(current["id"])})
+    except HTTPException:
+        user_doc = None
+    return await _compute_booking_pricing(user_doc, float(body.price))
+
+
+@api.get("/referrals/me")
+async def my_referrals(user: dict = Depends(get_current_user)):
+    doc = await db[USERS_COLLECTION].find_one({"_id": ObjectId(user["id"])})
+    if not doc:
+        raise HTTPException(status_code=404, detail="User not found")
+    # If the user was created before referrals landed, backfill a code now.
+    if not doc.get("referral_code"):
+        code = generate_referral_code()
+        while await db[USERS_COLLECTION].find_one({"referral_code": code}):
+            code = generate_referral_code()
+        await db[USERS_COLLECTION].update_one({"_id": doc["_id"]}, {"$set": {"referral_code": code}})
+        doc["referral_code"] = code
+
+    referred_users = await db[USERS_COLLECTION].find(
+        {"referred_by": user["id"]},
+        {"email": 1, "name": 1, "created_at": 1, "first_paid_reward_at": 1},
+    ).sort("created_at", -1).to_list(200)
+
+    return {
+        "referral_code": doc["referral_code"],
+        "credit_balance": float(doc.get("credit_balance", 0) or 0),
+        "friend_discount_pct": REFERRAL_FRIEND_DISCOUNT_PCT,
+        "referrer_credit": REFERRAL_REFERRER_CREDIT,
+        "referred_by_code": doc.get("referred_by_code"),
+        "referrals": [
+            {
+                "name": r.get("name"),
+                "email": r["email"],
+                "joined_at": r.get("created_at").isoformat() if isinstance(r.get("created_at"), datetime) else r.get("created_at"),
+                "rewarded": bool(r.get("first_paid_reward_at")),
+            }
+            for r in referred_users
+        ],
+    }
+
+
+# ---------------------------------------------------------------------------
+# Reminders (admin visibility)
+# ---------------------------------------------------------------------------
+@api.get("/admin/reminders")
+async def list_reminders(user: dict = Depends(get_current_user)):
+    if user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Admin access only")
+    cursor = db[REMINDERS_COLLECTION].find({}).sort("created_at", -1)
+    docs = await cursor.to_list(200)
+    return [
+        {
+            "id": str(d["_id"]),
+            "booking_id": d.get("booking_id"),
+            "service": d.get("service"),
+            "date": d.get("date"),
+            "mobile": d.get("mobile"),
+            "channel": d.get("channel", "sms"),
+            "status": d.get("status", "queued"),
+            "created_at": d["created_at"].isoformat() if isinstance(d.get("created_at"), datetime) else d.get("created_at"),
+        }
+        for d in docs
+    ]
+
+
+@api.post("/admin/reminders/run")
+async def run_reminder_job_now(user: dict = Depends(get_current_user)):
+    if user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Admin access only")
+    queued = await _run_reminder_job()
+    return {"queued": queued}
+
+
+async def _run_reminder_job() -> int:
+    """Look up bookings scheduled for tomorrow that haven't been reminded yet, and queue reminders.
+
+    Since no SMS/WhatsApp provider is wired up yet, the "send" step just logs the payload
+    and records it in the `reminders_log` collection. Wire the actual provider later.
+    """
+    tomorrow = (datetime.now(timezone.utc).date() + timedelta(days=1)).isoformat()
+    cursor = db[BOOKINGS_COLLECTION].find({
+        "date": tomorrow,
+        "status": {"$in": ["requested", "confirmed"]},
+        "$or": [
+            {"reminder_status": {"$exists": False}},
+            {"reminder_status": "pending"},
+        ],
+    })
+    queued = 0
+    async for booking in cursor:
+        message = (
+            f"Hi {booking.get('name', '')}, this is a friendly reminder from GngWar — "
+            f"your {booking.get('service')} ({booking.get('duration')}) is scheduled for {booking.get('date')}, "
+            f"{booking.get('time')}. Reply STOP to opt out."
+        )
+        entry = {
+            "_id": ObjectId(),
+            "booking_id": str(booking["_id"]),
+            "service": booking.get("service"),
+            "date": booking.get("date"),
+            "mobile": booking.get("mobile"),
+            "channel": "sms",  # provider not yet wired
+            "status": "queued",
+            "message": message,
+            "created_at": datetime.now(timezone.utc),
+        }
+        await db[REMINDERS_COLLECTION].insert_one(entry)
+        await db[BOOKINGS_COLLECTION].update_one(
+            {"_id": booking["_id"]},
+            {"$set": {"reminder_status": "queued", "reminder_queued_at": datetime.now(timezone.utc)}},
+        )
+        logger.info("[reminder-scheduler] queued for booking %s → %s", booking["_id"], booking.get("mobile"))
+        queued += 1
+    return queued
+
+
+scheduler: Optional[AsyncIOScheduler] = None
 
 
 app.include_router(api)
@@ -468,30 +726,53 @@ app.add_middleware(
 @app.on_event("startup")
 async def on_startup():
     await db[USERS_COLLECTION].create_index("email", unique=True)
+    await db[USERS_COLLECTION].create_index("referral_code", unique=True, sparse=True)
+    await db[USERS_COLLECTION].create_index("referred_by")
     await db[BOOKINGS_COLLECTION].create_index("user_id")
     await db[BOOKINGS_COLLECTION].create_index("created_at")
+    await db[BOOKINGS_COLLECTION].create_index("date")
 
     admin_email = os.environ.get("ADMIN_EMAIL", "admin@gngwar.com").lower()
     admin_password = os.environ.get("ADMIN_PASSWORD", "admin123")
     existing = await db[USERS_COLLECTION].find_one({"email": admin_email})
     if existing is None:
+        code = generate_referral_code()
         await db[USERS_COLLECTION].insert_one({
             "email": admin_email,
             "name": "GngWar Admin",
             "password_hash": hash_password(admin_password),
             "role": "admin",
+            "referral_code": code,
+            "credit_balance": 0.0,
             "created_at": datetime.now(timezone.utc),
         })
         logger.info("Seeded admin user: %s", admin_email)
     else:
+        updates = {}
         if not verify_password(admin_password, existing.get("password_hash", "")):
-            await db[USERS_COLLECTION].update_one(
-                {"_id": existing["_id"]},
-                {"$set": {"password_hash": hash_password(admin_password), "role": "admin"}},
-            )
-            logger.info("Refreshed admin password for: %s", admin_email)
+            updates["password_hash"] = hash_password(admin_password)
+            updates["role"] = "admin"
+        if not existing.get("referral_code"):
+            code = generate_referral_code()
+            while await db[USERS_COLLECTION].find_one({"referral_code": code}):
+                code = generate_referral_code()
+            updates["referral_code"] = code
+        if updates:
+            await db[USERS_COLLECTION].update_one({"_id": existing["_id"]}, {"$set": updates})
+
+    # Start reminder scheduler (hourly)
+    global scheduler
+    if scheduler is None:
+        scheduler = AsyncIOScheduler(timezone="UTC")
+        scheduler.add_job(_run_reminder_job, "interval", minutes=60, id="reminder-job", replace_existing=True)
+        scheduler.start()
+        logger.info("Reminder scheduler started (hourly)")
 
 
 @app.on_event("shutdown")
 async def on_shutdown():
+    global scheduler
+    if scheduler is not None:
+        scheduler.shutdown(wait=False)
+        scheduler = None
     client.close()

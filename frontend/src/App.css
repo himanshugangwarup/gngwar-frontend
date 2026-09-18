@@ -94,5 +94,48 @@
   .admin-row span{padding-right:8px}
   .chips{align-items:flex-start;flex-direction:row;flex-wrap:wrap}
 }
+
+/* Booking modal perks */
+.booking-perks{display:flex;flex-wrap:wrap;gap:8px;margin:-6px 0 20px}
+.perk-chip{display:inline-flex;align-items:center;gap:6px;background:#ffe6ec;color:var(--pink-dark);padding:7px 12px;border-radius:20px;font-size:11px;font-weight:800;border:1px solid #f8d1da}
+
+/* Auth referral */
+.referral-banner{display:flex;align-items:center;gap:8px;background:#eef8f0;color:#227a44;border:1px solid #cfe8d5;padding:11px 14px;border-radius:12px;font-size:12px;font-weight:600;margin:-4px 0 20px}
+.referral-banner strong{color:#0f5f2a;letter-spacing:1px}
+.optional-tag{background:#eeece8;color:#89858a;font-size:9px;font-weight:800;letter-spacing:1px;text-transform:uppercase;padding:2px 6px;border-radius:20px;margin-left:6px}
+
+/* Refer page */
+.refer-hero{display:grid;grid-template-columns:1.4fr 1fr;gap:16px;margin-bottom:36px}
+.refer-code-card{background:#fff;border:1px solid var(--line);padding:22px;display:flex;flex-direction:column;gap:14px}
+.refer-code-card .eyebrow.tiny{font-size:10px;letter-spacing:1.3px}
+.refer-link{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.refer-link code{flex:1;min-width:220px;background:#f5f2ef;padding:12px 14px;font:600 12px/1.4 "DM Mono",monospace;word-break:break-all}
+.refer-code-row{display:flex;align-items:center;gap:10px;color:#6f6e70;font-size:12px}
+.refer-code-row strong{font:800 15px Manrope;letter-spacing:1.5px;color:var(--pink-dark);background:#ffe6ec;padding:5px 11px;border-radius:20px}
+.refer-balance{background:var(--ink);color:#fff;padding:22px;display:flex;align-items:center;gap:16px}
+.refer-balance svg{color:#f8dce2;width:34px;height:34px}
+.refer-balance .stat-label{color:#a5a5a8}
+.refer-balance strong{display:block;font:800 26px Manrope;letter-spacing:-.6px;margin:2px 0 4px}
+.refer-balance small{color:#a5a5a8;font-size:11px}
+.refer-list{display:flex;flex-direction:column;gap:10px}
+.refer-row{display:flex;justify-content:space-between;align-items:center;background:#fff;border:1px solid var(--line);padding:14px 16px;gap:14px}
+.refer-row div{display:flex;flex-direction:column;gap:3px}
+.refer-row small{color:#7d7b7f;font-size:11px}
+
+/* MyBookings referral summary */
+.refer-summary{display:flex;justify-content:space-between;align-items:center;background:#fff;border:1px solid var(--line);padding:18px 22px;margin-bottom:28px;flex-wrap:wrap;gap:14px}
+.refer-summary strong{display:block;font:800 22px Manrope;color:var(--pink-dark);letter-spacing:-.5px}
+.refer-summary small{display:block;font-size:11px;color:#7d7b7f;margin-top:2px}
+
+/* Admin reminders */
+.admin-reminders{margin-bottom:36px}
+.admin-reminders .account-block-head h2{display:flex;align-items:center;gap:8px}
+.admin-reminders-actions{display:flex;align-items:center;gap:12px}
+.reminders-list{display:flex;flex-direction:column;gap:8px}
+.reminder-row{display:flex;justify-content:space-between;align-items:center;background:#fff;border:1px solid var(--line);padding:12px 16px}
+.reminder-row div{display:flex;flex-direction:column;gap:2px}
+.reminder-row small{color:#77747a;font-size:11px}
+
+@media(max-width:800px){.refer-hero{grid-template-columns:1fr}}
 @media(max-width:900px){.container{width:min(100% - 40px,680px)}.nav-links{position:absolute;top:77px;left:0;right:0;background:var(--paper);display:none;margin:0;padding:20px;flex-direction:column;align-items:stretch;border-bottom:1px solid var(--line);gap:0}.nav-links.open{display:flex}.nav-links a{padding:14px 0;border-bottom:1px solid var(--line)}.mobile-book{display:inline-flex;margin-top:15px}.desktop-book{display:none}.menu-toggle{display:inline-flex;border:0;background:none;cursor:pointer;margin-left:12px}.hero{padding:60px 0}.hero-grid{grid-template-columns:1fr;gap:45px}.hero-visual{height:400px}.services-grid{grid-template-columns:repeat(2,1fr)}.steps-grid{grid-template-columns:repeat(2,1fr);gap:38px}.step-arrow{display:none}.why-grid{grid-template-columns:1fr;gap:55px}.trust-content{align-items:flex-start;flex-direction:column}.contact-grid{gap:55px}.footer-top{grid-template-columns:1fr 1fr}.socials{grid-column:1/-1}.about-grid{grid-template-columns:.15fr 1fr}.about-copy{grid-column:2;padding-top:0}.split-heading{align-items:start;flex-direction:column;gap:5px}.split-heading>p{width:auto}.section{padding:80px 0}}
 @media(max-width:560px){.container{width:calc(100% - 32px)}.navbar{height:68px}.nav-links{top:67px}.hero{padding:48px 0}.hero h1{font-size:50px;letter-spacing:-2.8px}.hero-subtitle{font-size:15px}.trust-points{gap:11px;flex-direction:column}.hero-actions{align-items:flex-start;flex-direction:column;gap:19px}.hero-visual{height:330px}.quick-inner{min-width:700px}.section h2{font-size:38px;letter-spacing:-1.8px}.services-grid{grid-template-columns:1fr}.service-card{min-height:0}.steps-grid{grid-template-columns:1fr;gap:30px}.step-line{margin-bottom:14px}.why-grid{gap:35px}.benefits-grid{grid-template-columns:1fr}.benefit{padding:21px}.trust-band{padding:58px 0}.trust-band h2{font-size:38px}.trust-items{grid-template-columns:1fr;gap:16px}.about-grid{grid-template-columns:1fr;gap:17px}.about-number{display:none}.about-copy{grid-column:auto;padding-top:0}.cta-inner{align-items:flex-start;flex-direction:column;gap:25px}.cta-section h2{font-size:38px}.contact-grid{grid-template-columns:1fr}.footer-top{grid-template-columns:1fr;gap:37px}.socials{grid-column:auto}.footer-bottom{gap:10px;flex-direction:column}.booking-modal,.confirmation-modal{padding:28px 19px}.booking-modal h2,.confirmation-modal h2{font-size:29px}.booking-summary{grid-template-columns:1fr 1fr}.summary-price{grid-column:1/-1}.form-grid{grid-template-columns:1fr}.full-field{grid-column:auto}.confirmation-details{gap:10px;flex-direction:column}}

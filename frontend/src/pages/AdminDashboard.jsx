@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { ArrowLeft, BadgeCheck, Filter, Search, Wallet } from "lucide-react";
+import { ArrowLeft, BadgeCheck, Bell, Filter, Play, Search, Wallet } from "lucide-react";
 import { api, formatApiErrorDetail } from "@/lib/api";
 import { formatINR } from "@/data/services";
 import { useAuth } from "@/context/AuthContext";
@@ -15,6 +15,9 @@ export default function AdminDashboard() {
   const [error, setError] = useState("");
   const [filter, setFilter] = useState("all");
   const [q, setQ] = useState("");
+  const [reminders, setReminders] = useState([]);
+  const [reminderBusy, setReminderBusy] = useState(false);
+  const [reminderMsg, setReminderMsg] = useState("");
 
   useEffect(() => {
     if (user === false) {
@@ -26,11 +29,30 @@ export default function AdminDashboard() {
 
   const refresh = async () => {
     try {
-      const { data } = await api.get("/bookings");
-      setItems(data);
+      const [bookings, rem] = await Promise.all([
+        api.get("/bookings"),
+        api.get("/admin/reminders").catch(() => ({ data: [] })),
+      ]);
+      setItems(bookings.data);
+      setReminders(rem.data);
     } catch (e) {
       setError(formatApiErrorDetail(e.response?.data?.detail) || "Could not load bookings.");
       setItems([]);
+    }
+  };
+
+  const runReminderJob = async () => {
+    setReminderBusy(true);
+    setReminderMsg("");
+    try {
+      const { data } = await api.post("/admin/reminders/run");
+      setReminderMsg(`Queued ${data.queued} reminder${data.queued === 1 ? "" : "s"}.`);
+      const { data: list } = await api.get("/admin/reminders");
+      setReminders(list);
+    } catch (e) {
+      setReminderMsg(formatApiErrorDetail(e.response?.data?.detail) || "Reminder job failed.");
+    } finally {
+      setReminderBusy(false);
     }
   };
 
@@ -133,6 +155,40 @@ export default function AdminDashboard() {
       </div>
 
       {error && <p className="form-error" role="alert" data-testid="admin-error">{error}</p>}
+
+      <section className="admin-reminders" data-testid="admin-reminders-section">
+        <div className="account-block-head">
+          <h2><Bell size={16} /> Reminders (day-before)</h2>
+          <div className="admin-reminders-actions">
+            {reminderMsg && <span className="muted-count" data-testid="admin-reminder-msg">{reminderMsg}</span>}
+            <button
+              className="button button-outline small"
+              onClick={runReminderJob}
+              disabled={reminderBusy}
+              data-testid="admin-run-reminders"
+            >
+              <Play size={13} /> {reminderBusy ? "Running…" : "Run job now"}
+            </button>
+          </div>
+        </div>
+        {reminders.length === 0 ? (
+          <p className="empty-state">No reminders queued yet. The scheduler runs hourly and queues reminders for bookings scheduled the next day.</p>
+        ) : (
+          <div className="reminders-list">
+            {reminders.slice(0, 8).map((r) => (
+              <div className="reminder-row" key={r.id} data-testid={`reminder-row-${r.id}`}>
+                <div>
+                  <strong>{r.service}</strong>
+                  <small>{r.date} · {r.mobile}</small>
+                </div>
+                <span className={r.status === "sent" ? "chip chip-success" : "chip chip-warn"}>
+                  {r.channel.toUpperCase()} · {r.status}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
 
       <div className="admin-table" data-testid="admin-booking-table">
         <div className="admin-row admin-row-head">

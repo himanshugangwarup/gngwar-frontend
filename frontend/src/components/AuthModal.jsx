@@ -1,12 +1,30 @@
-import { useState } from "react";
-import { ArrowRight, X } from "lucide-react";
+import { useEffect, useState } from "react";
+import { ArrowRight, Gift, X } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
+
+const REF_STORAGE_KEY = "gngwar_ref_code";
 
 export default function AuthModal({ mode = "login", onClose, onSwitchMode }) {
   const { login, register } = useAuth();
-  const [form, setForm] = useState({ name: "", email: "", password: "" });
+  const [form, setForm] = useState({ name: "", email: "", password: "", referral: "" });
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+
+  // Prefill referral code from URL (?ref=CODE) or localStorage.
+  useEffect(() => {
+    try {
+      const url = new URL(window.location.href);
+      const fromQuery = url.searchParams.get("ref");
+      const stored = window.localStorage.getItem(REF_STORAGE_KEY);
+      const code = fromQuery || stored || "";
+      if (code) {
+        window.localStorage.setItem(REF_STORAGE_KEY, code);
+        setForm((f) => ({ ...f, referral: code.toUpperCase() }));
+      }
+    } catch {
+      /* SSR safeguard */
+    }
+  }, []);
 
   const update = (key) => (event) => {
     setError("");
@@ -30,9 +48,11 @@ export default function AuthModal({ mode = "login", onClose, onSwitchMode }) {
     setBusy(true);
     const result = mode === "login"
       ? await login(form.email, form.password)
-      : await register(form.name, form.email, form.password);
+      : await register(form.name, form.email, form.password, form.referral.trim() || null);
     setBusy(false);
     if (result.ok) {
+      // Clear stored referral once used.
+      try { window.localStorage.removeItem(REF_STORAGE_KEY); } catch {}
       onClose?.();
     } else {
       setError(result.error || "Something went wrong.");
@@ -57,8 +77,15 @@ export default function AuthModal({ mode = "login", onClose, onSwitchMode }) {
         <p className="modal-intro">
           {mode === "login"
             ? "Access your saved bookings and manage upcoming services."
-            : "Track your bookings and get faster checkout every time."}
+            : "Track your bookings, unlock referral perks, and check out faster every time."}
         </p>
+
+        {mode === "register" && form.referral && (
+          <p className="referral-banner" data-testid="referral-banner">
+            <Gift size={16} /> You'll get 15% off your first booking with code{" "}
+            <strong>{form.referral}</strong>.
+          </p>
+        )}
 
         <div className="form-grid">
           {mode === "register" && (
@@ -95,6 +122,17 @@ export default function AuthModal({ mode = "login", onClose, onSwitchMode }) {
               autoComplete={mode === "login" ? "current-password" : "new-password"}
             />
           </label>
+          {mode === "register" && (
+            <label className="full-field">
+              Referral code <span className="optional-tag">optional</span>
+              <input
+                value={form.referral}
+                onChange={(e) => setForm({ ...form, referral: e.target.value.toUpperCase() })}
+                placeholder="e.g. GNGAB12"
+                data-testid="auth-referral-input"
+              />
+            </label>
+          )}
         </div>
 
         {error && (

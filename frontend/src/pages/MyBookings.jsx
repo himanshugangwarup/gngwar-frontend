@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { ArrowLeft, ArrowRight, BadgeCheck, Clock3, Wallet } from "lucide-react";
+import { ArrowLeft, ArrowRight, BadgeCheck, Clock3, Gift, Wallet } from "lucide-react";
 import { api, formatApiErrorDetail } from "@/lib/api";
 import { formatINR } from "@/data/services";
 import { useAuth } from "@/context/AuthContext";
@@ -26,6 +26,7 @@ export default function MyBookings() {
   const [items, setItems] = useState(null);
   const [error, setError] = useState("");
   const [paying, setPaying] = useState(null);
+  const [referral, setReferral] = useState(null);
 
   useEffect(() => {
     if (user === false) {
@@ -35,8 +36,12 @@ export default function MyBookings() {
 
   const refresh = async () => {
     try {
-      const { data } = await api.get("/bookings/me");
-      setItems(data);
+      const [bookings, ref] = await Promise.all([
+        api.get("/bookings/me"),
+        api.get("/referrals/me").catch(() => ({ data: null })),
+      ]);
+      setItems(bookings.data);
+      setReferral(ref.data);
     } catch (e) {
       setError(formatApiErrorDetail(e.response?.data?.detail) || "Could not load bookings.");
       setItems([]);
@@ -115,6 +120,19 @@ export default function MyBookings() {
       </div>
 
       {error && <p className="form-error" role="alert" data-testid="my-bookings-error">{error}</p>}
+
+      {referral && (
+        <div className="refer-summary" data-testid="my-bookings-referral">
+          <div>
+            <span className="stat-label">Credit balance</span>
+            <strong>{formatINR(referral.credit_balance)}</strong>
+            <small>Auto-applies on your next booking.</small>
+          </div>
+          <Link to="/refer" className="button button-outline small" data-testid="my-bookings-refer-link">
+            <Gift size={14} /> Refer & earn {formatINR(referral.referrer_credit)}
+          </Link>
+        </div>
+      )}
 
       <section className="account-block">
         <div className="account-block-head">

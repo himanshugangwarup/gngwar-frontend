@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { ArrowRight, Menu, X, LogOut, UserRound, LayoutDashboard, CalendarClock } from "lucide-react";
+import { ArrowRight, Menu, X, LogOut, UserRound, LayoutDashboard, CalendarClock, Gift } from "lucide-react";
 import { Link } from "react-router-dom";
 import Logo from "./Logo";
 import { useAuth } from "@/context/AuthContext";
@@ -35,6 +35,16 @@ export default function Navbar({ onOpenBooking, onOpenAuth }) {
               data-testid="mobile-my-bookings"
             >
               My Bookings
+            </Link>
+          )}
+          {authed && (
+            <Link
+              to="/refer"
+              onClick={close}
+              className="mobile-only-link"
+              data-testid="mobile-refer"
+            >
+              Refer & Earn
             </Link>
           )}
           {isAdmin && (
@@ -103,6 +113,13 @@ export default function Navbar({ onOpenBooking, onOpenAuth }) {
                     data-testid="menu-my-bookings"
                   >
                     <CalendarClock size={14} /> My Bookings
+                  </Link>
+                  <Link
+                    to="/refer"
+                    onClick={() => setMenu(false)}
+                    data-testid="menu-refer"
+                  >
+                    <Gift size={14} /> Refer & Earn
                   </Link>
                   {isAdmin && (
                     <Link

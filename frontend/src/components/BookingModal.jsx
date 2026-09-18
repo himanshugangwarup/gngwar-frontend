@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
-import { ArrowRight, Check, ShieldCheck, X, Wallet } from "lucide-react";
+import { ArrowRight, Check, Gift, ShieldCheck, X, Wallet } from "lucide-react";
 import { PRICING, SERVICES, getPriceFor, formatINR, DEFAULT_DURATION } from "@/data/services";
 import { api, formatApiErrorDetail } from "@/lib/api";
 import { loadRazorpay } from "@/lib/razorpay";
+import { useAuth } from "@/context/AuthContext";
 
 export default function BookingModal({ selected, onClose }) {
+  const { user } = useAuth();
   const initialService = selected?.name || "";
   const initialDuration = selected?.duration || DEFAULT_DURATION;
   const [service, setService] = useState(initialService);
@@ -15,8 +17,10 @@ export default function BookingModal({ selected, onClose }) {
   const [booking, setBooking] = useState(null); // set after backend creates the booking
   const [paying, setPaying] = useState(false);
   const [paymentEnabled, setPaymentEnabled] = useState(true);
+  const [quote, setQuote] = useState(null);
 
   const chosen = useMemo(() => getPriceFor(duration), [duration]);
+  const authed = user && typeof user === "object";
 
   useEffect(() => {
     let cancelled = false;
@@ -27,6 +31,15 @@ export default function BookingModal({ selected, onClose }) {
     });
     return () => { cancelled = true; };
   }, []);
+
+  // Fetch pricing quote whenever duration or user changes
+  useEffect(() => {
+    let cancelled = false;
+    api.post("/bookings/quote", { price: chosen.price })
+      .then(({ data }) => { if (!cancelled) setQuote(data); })
+      .catch(() => { if (!cancelled) setQuote(null); });
+    return () => { cancelled = true; };
+  }, [chosen.price, authed]);
 
   const update = (key) => (event) => {
     setError("");
@@ -205,10 +218,26 @@ export default function BookingModal({ selected, onClose }) {
           <div className="summary-price">
             <span>Total</span>
             <strong data-testid="booking-total-price">
-              {formatINR(chosen.price)} <del>{formatINR(chosen.original)}</del>
+              {formatINR(quote?.final_price ?? chosen.price)}{" "}
+              <del>{formatINR(chosen.original)}</del>
             </strong>
           </div>
         </div>
+
+        {quote && (quote.discount_pct > 0 || quote.credit_used > 0) && (
+          <div className="booking-perks" data-testid="booking-perks">
+            {quote.discount_pct > 0 && (
+              <span className="perk-chip" data-testid="perk-discount">
+                <Gift size={13} /> {quote.discount_pct}% first-booking discount applied
+              </span>
+            )}
+            {quote.credit_used > 0 && (
+              <span className="perk-chip" data-testid="perk-credit">
+                <Wallet size={13} /> {formatINR(quote.credit_used)} referral credit used
+              </span>
+            )}
+          </div>
+        )}
 
         <div className="form-grid">
           <label>

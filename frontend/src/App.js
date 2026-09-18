@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { BrowserRouter, Route, Routes } from "react-router-dom";
 import { AuthProvider } from "@/context/AuthContext";
 import Navbar from "@/components/Navbar";
@@ -16,11 +16,24 @@ import BookingModal from "@/components/BookingModal";
 import AuthModal from "@/components/AuthModal";
 import MyBookings from "@/pages/MyBookings";
 import AdminDashboard from "@/pages/AdminDashboard";
+import Refer from "@/pages/Refer";
 import "@/App.css";
 
 function Home() {
   const [booking, setBooking] = useState(null);
   const [authMode, setAuthMode] = useState(null);
+
+  // Capture ?ref=CODE from the URL and remember it so the register modal picks it up.
+  useEffect(() => {
+    try {
+      const url = new URL(window.location.href);
+      const ref = url.searchParams.get("ref");
+      if (ref) {
+        window.localStorage.setItem("gngwar_ref_code", ref.toUpperCase());
+        setAuthMode("register");
+      }
+    } catch { /* SSR */ }
+  }, []);
 
   const openBooking = (service = null) => {
     setBooking(service || { name: "", duration: "60 Minutes" });
@@ -70,6 +83,7 @@ export default function App() {
           <Route path="/" element={<Home />} />
           <Route path="/my-bookings" element={<MyBookings />} />
           <Route path="/admin" element={<AdminDashboard />} />
+          <Route path="/refer" element={<Refer />} />
         </Routes>
       </BrowserRouter>
     </AuthProvider>
