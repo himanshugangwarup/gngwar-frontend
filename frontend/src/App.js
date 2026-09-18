@@ -40,8 +40,17 @@ function Logo() {
 function BookingModal({ selected, onClose, onConfirm }) {
   const [duration, setDuration] = useState(selected?.duration || "60 Minutes");
   const [form, setForm] = useState({ name: "", mobile: "", address: "", date: "", time: "" });
+  const [formError, setFormError] = useState("");
   const selectedPrice = pricing.find((item) => item.duration === duration) || pricing[2];
-  const update = (key) => (event) => setForm({ ...form, [key]: event.target.value });
+  const update = (key) => (event) => { setFormError(""); setForm({ ...form, [key]: event.target.value }); };
+  const submitBooking = () => {
+    const missing = [form.name, form.mobile, form.address, form.date, form.time].some((value) => !value.trim());
+    if (missing) {
+      setFormError("Please complete your name, mobile number, address, date and preferred time.");
+      return;
+    }
+    onConfirm({ ...form, service: selected?.name || "", duration, price: selectedPrice.price, original: selectedPrice.original });
+  };
 
   return <div className="modal-backdrop" role="dialog" aria-modal="true" data-testid="booking-modal">
     <div className="booking-modal">
@@ -61,8 +70,9 @@ function BookingModal({ selected, onClose, onConfirm }) {
         <label>Date<input type="date" value={form.date} onChange={update("date")} data-testid="booking-date-input" required /></label>
         <label>Preferred time<select value={form.time} onChange={update("time")} data-testid="booking-time-select" required><option value="">Select a time</option><option>Morning · 8 AM – 12 PM</option><option>Afternoon · 12 PM – 4 PM</option><option>Evening · 4 PM – 8 PM</option></select></label>
       </div>
+      {formError && <p className="form-error" role="alert" data-testid="booking-form-error">{formError}</p>}
       <p className="booking-note"><ShieldCheck size={16} /> Your price is locked in before you continue. Payment can be connected here later.</p>
-      <button className="button button-dark full-button" onClick={() => onConfirm({ ...form, service: selected?.name || "", duration, price: selectedPrice.price, original: selectedPrice.original })} data-testid="continue-booking-button">Continue Booking <ArrowRight size={17} /></button>
+      <button className="button button-dark full-button" onClick={submitBooking} data-testid="continue-booking-button">Continue Booking <ArrowRight size={17} /></button>
     </div>
   </div>;
 }
