@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
-import { ArrowRight, Check, ShieldCheck, X } from "lucide-react";
+import { ArrowRight, Check, ShieldCheck, X, Wallet } from "lucide-react";
 import { PRICING, SERVICES, getPriceFor, formatINR, DEFAULT_DURATION } from "@/data/services";
 import { api, formatApiErrorDetail } from "@/lib/api";
+import { loadRazorpay } from "@/lib/razorpay";
 
-export default function BookingModal({ selected, onClose, onConfirmed, onRequireService }) {
+export default function BookingModal({ selected, onClose }) {
   const initialService = selected?.name || "";
   const initialDuration = selected?.duration || DEFAULT_DURATION;
   const [service, setService] = useState(initialService);
@@ -11,14 +12,21 @@ export default function BookingModal({ selected, onClose, onConfirmed, onRequire
   const [form, setForm] = useState({ name: "", mobile: "", address: "", date: "", time: "" });
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
-  const [success, setSuccess] = useState(null);
+  const [booking, setBooking] = useState(null); // set after backend creates the booking
+  const [paying, setPaying] = useState(false);
+  const [paymentEnabled, setPaymentEnabled] = useState(true);
 
   const chosen = useMemo(() => getPriceFor(duration), [duration]);
 
   useEffect(() => {
-    // If BookingModal is opened without a service selected, prompt selection panel.
-    if (!service && onRequireService) onRequireService();
-  }, []); // eslint-disable-line
+    let cancelled = false;
+    api.get("/payments/razorpay/config").then(({ data }) => {
+      if (!cancelled) setPaymentEnabled(!!data.enabled);
+    }).catch(() => {
+      if (!cancelled) setPaymentEnabled(false);
+    });
+    return () => { cancelled = true; };
+  }, []);
 
   const update = (key) => (event) => {
     setError("");
@@ -40,16 +48,14 @@ export default function BookingModal({ selected, onClose, onConfirmed, onRequire
 
     setBusy(true);
     try {
-      const payload = {
+      const { data } = await api.post("/bookings", {
         service,
         duration,
         price: chosen.price,
         original: chosen.original,
         ...form,
-      };
-      const { data } = await api.post("/bookings", payload);
-      setSuccess(data);
-      onConfirmed?.(data);
+      });
+      setBooking(data);
     } catch (e) {
       setError(formatApiErrorDetail(e.response?.data?.detail) || "Booking failed. Please try again.");
     } finally {
@@ -57,7 +63,48 @@ export default function BookingModal({ selected, onClose, onConfirmed, onRequire
     }
   };
 
-  if (success) {
+  const startPayment = async () => {
+    if (!booking) return;
+    setError("");
+    setPaying(true);
+    try {
+      const Razorpay = await loadRazorpay();
+      const { data: order } = await api.post("/payments/razorpay/order", { booking_id: booking.id });
+      const rzp = new Razorpay({
+        key: order.key_id,
+        amount: order.amount,
+        currency: order.currency,
+        order_id: order.order_id,
+        name: "GngWar",
+        description: `${booking.service} · ${booking.duration}`,
+        prefill: { name: order.name, contact: order.mobile },
+        theme: { color: "#f05a78" },
+        handler: async (resp) => {
+          try {
+            const { data: updated } = await api.post("/payments/razorpay/verify", {
+              booking_id: booking.id,
+              razorpay_order_id: resp.razorpay_order_id,
+              razorpay_payment_id: resp.razorpay_payment_id,
+              razorpay_signature: resp.razorpay_signature,
+            });
+            setBooking(updated);
+          } catch (e) {
+            setError(formatApiErrorDetail(e.response?.data?.detail) || "Payment verification failed.");
+          } finally {
+            setPaying(false);
+          }
+        },
+        modal: { ondismiss: () => setPaying(false) },
+      });
+      rzp.open();
+    } catch (e) {
+      setPaying(false);
+      setError(formatApiErrorDetail(e.response?.data?.detail) || e.message || "Could not open payment.");
+    }
+  };
+
+  if (booking) {
+    const paid = booking.payment_status === "paid";
     return (
       <div className="modal-backdrop" role="dialog" aria-modal="true" data-testid="booking-confirmation">
         <div className="confirmation-modal">
@@ -72,19 +119,34 @@ export default function BookingModal({ selected, onClose, onConfirmed, onRequire
           <div className="confirmation-icon">
             <Check />
           </div>
-          <div className="eyebrow">BOOKING CONFIRMED</div>
-          <h2>We've got it from here.</h2>
+          <div className="eyebrow">{paid ? "PAYMENT SUCCESSFUL" : "BOOKING CONFIRMED"}</div>
+          <h2>{paid ? "You're all set." : "We've got it from here."}</h2>
           <p>
-            Your booking for <strong>{success.service}</strong> is saved. Our team will reach
-            you on <strong>{success.mobile}</strong> to confirm details.
+            {paid
+              ? `Your ${booking.service} is paid and scheduled. Our team will reach ${booking.mobile} on ${booking.date}.`
+              : `Your booking for ${booking.service} is saved. `}
+            {!paid && paymentEnabled && "Pay now to lock in the slot, or our team will call to confirm."}
+            {!paid && !paymentEnabled && "Our team will call to confirm the details."}
           </p>
           <div className="confirmation-details">
-            <span>{success.duration}</span>
-            <strong>{formatINR(success.price)}</strong>
-            <span>{success.date} · {success.time.split(" · ")[0]}</span>
+            <span>{booking.duration}</span>
+            <strong>{formatINR(booking.price)}</strong>
+            <span>{booking.date} · {booking.time.split(" · ")[0]}</span>
           </div>
+
+          {!paid && paymentEnabled && (
+            <button
+              className="button button-pink full-button"
+              onClick={startPayment}
+              disabled={paying}
+              data-testid="pay-now-button"
+            >
+              {paying ? "Opening payment…" : "Pay now"} <Wallet size={17} />
+            </button>
+          )}
+          {error && <p className="form-error" role="alert" data-testid="payment-error">{error}</p>}
           <button
-            className="button button-dark full-button"
+            className={`button ${paid || !paymentEnabled ? "button-dark" : "button-outline"} full-button confirmation-done`}
             onClick={onClose}
             data-testid="confirmation-done-button"
           >
@@ -214,6 +276,7 @@ export default function BookingModal({ selected, onClose, onConfirmed, onRequire
 
         <p className="booking-note">
           <ShieldCheck size={16} /> Your price is locked in before you continue.
+          {paymentEnabled && " Pay online after booking or ask our team to collect on site."}
         </p>
 
         <button

@@ -1,14 +1,17 @@
 import { useState } from "react";
-import { ArrowRight, Menu, X, LogOut, UserRound } from "lucide-react";
+import { ArrowRight, Menu, X, LogOut, UserRound, LayoutDashboard, CalendarClock } from "lucide-react";
+import { Link } from "react-router-dom";
 import Logo from "./Logo";
 import { useAuth } from "@/context/AuthContext";
 
 export default function Navbar({ onOpenBooking, onOpenAuth }) {
   const [open, setOpen] = useState(false);
+  const [menu, setMenu] = useState(false);
   const { user, logout } = useAuth();
 
   const close = () => setOpen(false);
   const authed = user && typeof user === "object";
+  const isAdmin = authed && user.role === "admin";
 
   return (
     <header className="navbar" data-testid="main-navbar">
@@ -23,6 +26,27 @@ export default function Navbar({ onOpenBooking, onOpenAuth }) {
           <a href="#how-it-works" onClick={close} data-testid="nav-how-it-works">How It Works</a>
           <a href="#about" onClick={close} data-testid="nav-about">About Us</a>
           <a href="#contact" onClick={close} data-testid="nav-contact">Contact</a>
+
+          {authed && (
+            <Link
+              to="/my-bookings"
+              onClick={close}
+              className="mobile-only-link"
+              data-testid="mobile-my-bookings"
+            >
+              My Bookings
+            </Link>
+          )}
+          {isAdmin && (
+            <Link
+              to="/admin"
+              onClick={close}
+              className="mobile-only-link"
+              data-testid="mobile-admin"
+            >
+              Admin
+            </Link>
+          )}
 
           {!authed ? (
             <button
@@ -62,16 +86,41 @@ export default function Navbar({ onOpenBooking, onOpenAuth }) {
             </button>
           ) : (
             <div className="user-pill desktop-login" data-testid="navbar-user-pill">
-              <UserRound size={14} />
-              <span>{user.name?.split(" ")[0] || "Account"}</span>
               <button
-                className="icon-button"
-                onClick={logout}
-                aria-label="Sign out"
-                data-testid="navbar-logout-button"
+                className="user-pill-main"
+                onClick={() => setMenu((m) => !m)}
+                aria-expanded={menu}
+                data-testid="user-pill-toggle"
               >
-                <LogOut size={14} />
+                <UserRound size={14} />
+                <span>{user.name?.split(" ")[0] || "Account"}</span>
               </button>
+              {menu && (
+                <div className="user-menu" role="menu" data-testid="user-menu">
+                  <Link
+                    to="/my-bookings"
+                    onClick={() => setMenu(false)}
+                    data-testid="menu-my-bookings"
+                  >
+                    <CalendarClock size={14} /> My Bookings
+                  </Link>
+                  {isAdmin && (
+                    <Link
+                      to="/admin"
+                      onClick={() => setMenu(false)}
+                      data-testid="menu-admin"
+                    >
+                      <LayoutDashboard size={14} /> Admin
+                    </Link>
+                  )}
+                  <button
+                    onClick={() => { setMenu(false); logout(); }}
+                    data-testid="menu-logout"
+                  >
+                    <LogOut size={14} /> Sign out
+                  </button>
+                </div>
+              )}
             </div>
           )}
           <button

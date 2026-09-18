@@ -8,11 +8,14 @@ import os
 import logging
 import uuid
 import re
+import hmac
+import hashlib
 from datetime import datetime, timezone, timedelta
 from typing import List, Optional, Annotated
 
 import bcrypt
 import jwt
+import razorpay
 from bson import ObjectId
 from fastapi import FastAPI, APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -27,6 +30,11 @@ JWT_ALGORITHM = "HS256"
 ACCESS_TOKEN_MINUTES = 60 * 24  # 1 day (session-friendly for MVP)
 BOOKINGS_COLLECTION = "bookings"
 USERS_COLLECTION = "users"
+
+RAZORPAY_KEY_ID = os.environ.get("RAZORPAY_KEY_ID", "").strip()
+RAZORPAY_KEY_SECRET = os.environ.get("RAZORPAY_KEY_SECRET", "").strip()
+RAZORPAY_ENABLED = bool(RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET)
+razorpay_client = razorpay.Client(auth=(RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET)) if RAZORPAY_ENABLED else None
 
 mongo_url = os.environ["MONGO_URL"]
 client = AsyncIOMotorClient(mongo_url)
@@ -97,8 +105,26 @@ class BookingOut(BaseModel):
     date: str
     time: str
     status: str
+    payment_status: str = "unpaid"
+    payment_id: Optional[str] = None
+    razorpay_order_id: Optional[str] = None
     user_id: Optional[str] = None
     created_at: str
+
+
+class BookingStatusUpdate(BaseModel):
+    status: str = Field(pattern="^(requested|confirmed|completed|cancelled)$")
+
+
+class RazorpayOrderIn(BaseModel):
+    booking_id: str
+
+
+class RazorpayVerifyIn(BaseModel):
+    booking_id: str
+    razorpay_order_id: str
+    razorpay_payment_id: str
+    razorpay_signature: str
 
 
 # ---------------------------------------------------------------------------
@@ -250,6 +276,9 @@ def _booking_to_out(doc: dict) -> BookingOut:
         date=doc["date"],
         time=doc["time"],
         status=doc.get("status", "requested"),
+        payment_status=doc.get("payment_status", "unpaid"),
+        payment_id=doc.get("payment_id"),
+        razorpay_order_id=doc.get("razorpay_order_id"),
         user_id=doc.get("user_id"),
         created_at=doc["created_at"].isoformat() if isinstance(doc.get("created_at"), datetime) else doc["created_at"],
     )
@@ -277,6 +306,9 @@ async def create_booking(body: BookingIn, request: Request):
         "date": body.date,
         "time": body.time,
         "status": "requested",
+        "payment_status": "unpaid",
+        "payment_id": None,
+        "razorpay_order_id": None,
         "user_id": user_id,
         "created_at": datetime.now(timezone.utc),
     }
@@ -302,7 +334,112 @@ async def all_bookings(user: dict = Depends(get_current_user)):
 
 @api.get("/health")
 async def health():
-    return {"status": "ok", "service": "gngwar-api"}
+    return {"status": "ok", "service": "gngwar-api", "razorpay": RAZORPAY_ENABLED}
+
+
+@api.patch("/bookings/{booking_id}/status", response_model=BookingOut)
+async def update_booking_status(booking_id: str, body: BookingStatusUpdate, user: dict = Depends(get_current_user)):
+    if user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Admin access only")
+    try:
+        oid = ObjectId(booking_id)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid booking id")
+    result = await db[BOOKINGS_COLLECTION].find_one_and_update(
+        {"_id": oid},
+        {"$set": {"status": body.status}},
+        return_document=True,
+    )
+    if not result:
+        raise HTTPException(status_code=404, detail="Booking not found")
+    return _booking_to_out(result)
+
+
+# ---------------------------------------------------------------------------
+# Payments (Razorpay)
+# ---------------------------------------------------------------------------
+@api.get("/payments/razorpay/config")
+async def razorpay_config():
+    return {"enabled": RAZORPAY_ENABLED, "key_id": RAZORPAY_KEY_ID if RAZORPAY_ENABLED else ""}
+
+
+@api.post("/payments/razorpay/order")
+async def create_razorpay_order(body: RazorpayOrderIn, request: Request):
+    if not RAZORPAY_ENABLED:
+        raise HTTPException(
+            status_code=503,
+            detail="Payments are not yet configured. Please contact GngWar support to complete your booking.",
+        )
+    try:
+        oid = ObjectId(body.booking_id)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid booking id")
+
+    booking = await db[BOOKINGS_COLLECTION].find_one({"_id": oid})
+    if not booking:
+        raise HTTPException(status_code=404, detail="Booking not found")
+    if booking.get("payment_status") == "paid":
+        raise HTTPException(status_code=409, detail="This booking is already paid.")
+
+    amount_paise = int(round(float(booking["price"]) * 100))
+    receipt = f"gngwar-{str(oid)[-12:]}"
+    try:
+        order = razorpay_client.order.create({
+            "amount": amount_paise,
+            "currency": "INR",
+            "receipt": receipt,
+            "payment_capture": 1,
+            "notes": {"service": booking["service"], "booking_id": str(oid)},
+        })
+    except Exception as e:
+        logger.exception("Razorpay order creation failed")
+        raise HTTPException(status_code=502, detail=f"Payment gateway error: {e}")
+
+    await db[BOOKINGS_COLLECTION].update_one(
+        {"_id": oid},
+        {"$set": {"razorpay_order_id": order["id"], "payment_status": "pending"}},
+    )
+    return {
+        "order_id": order["id"],
+        "amount": amount_paise,
+        "currency": "INR",
+        "key_id": RAZORPAY_KEY_ID,
+        "booking_id": str(oid),
+        "name": booking["name"],
+        "mobile": booking["mobile"],
+    }
+
+
+@api.post("/payments/razorpay/verify", response_model=BookingOut)
+async def verify_razorpay(body: RazorpayVerifyIn):
+    if not RAZORPAY_ENABLED:
+        raise HTTPException(status_code=503, detail="Payments are not yet configured.")
+
+    signed_payload = f"{body.razorpay_order_id}|{body.razorpay_payment_id}".encode("utf-8")
+    expected = hmac.new(RAZORPAY_KEY_SECRET.encode("utf-8"), signed_payload, hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(expected, body.razorpay_signature):
+        raise HTTPException(status_code=400, detail="Invalid payment signature. Please try again.")
+
+    try:
+        oid = ObjectId(body.booking_id)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid booking id")
+
+    result = await db[BOOKINGS_COLLECTION].find_one_and_update(
+        {"_id": oid, "razorpay_order_id": body.razorpay_order_id},
+        {
+            "$set": {
+                "payment_status": "paid",
+                "payment_id": body.razorpay_payment_id,
+                "status": "confirmed",
+                "paid_at": datetime.now(timezone.utc),
+            }
+        },
+        return_document=True,
+    )
+    if not result:
+        raise HTTPException(status_code=404, detail="Booking not found for this order")
+    return _booking_to_out(result)
 
 
 app.include_router(api)

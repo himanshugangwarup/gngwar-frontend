@@ -35,10 +35,10 @@ export default function Hero({ onBook }) {
           </div>
         </div>
 
-        <div className="hero-visual" data-testid="team-image-placeholder">
+        <div className="hero-visual" data-testid="team-image-wrapper">
           <img
-            src="/assets/images/team-placeholder.svg"
-            alt="GngWar female service professionals — replace with the exact team photo"
+            src="/assets/images/team-crop.jpg"
+            alt="GngWar female service professionals"
             className="team-image"
           />
           <div className="hero-caption">
