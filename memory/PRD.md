@@ -1,12 +1,12 @@
 # GngWar — Product Requirements Document
 
 ## Original problem statement
-Modern home-services web app for GngWar (India). Sticky navbar, hero with the exact team image, 12 service cards with 6-duration pricing matrix, booking flow that carries service/duration/price forward, and marketing sections. Follow-up asks: modular components, updated pricing (₹75/112.50/150/225/300/450), FastAPI + MongoDB backend with JWT httpOnly-cookie auth, My Bookings page for signed-in customers, Admin Dashboard for staff, Razorpay payment integration (test mode).
+Modern home-services platform for GngWar (India). Sticky navbar, hero with the exact team image, 12 service cards with 6-duration pricing, booking flow that carries service/duration/price forward, marketing sections, auth, admin dashboard, payments (Razorpay), reminders, referral program.
 
-## User personas
-- Homeowner (primary) — books help in under 60 seconds and pays online.
-- Registered customer — tracks upcoming + past bookings, pays for pending ones.
-- GngWar Admin — reviews all bookings, updates status, tracks revenue.
+## Personas
+- Homeowner — books in <60 seconds, pays online.
+- Registered customer — tracks bookings + refers friends for credit.
+- Admin — reviews bookings, tracks revenue, runs reminders.
 
 ## Pricing (Feb 2026)
 | Duration | Price | Strike |
@@ -18,36 +18,52 @@ Modern home-services web app for GngWar (India). Sticky navbar, hero with the ex
 | 120 min | ₹300 | ₹345 |
 | 180 min | ₹450 | ₹518 |
 
-## What's implemented (2026-02)
-- Modular React components (`src/components/*`) + routed pages (`src/pages/MyBookings.jsx`, `AdminDashboard.jsx`).
-- React Router v7 with `/`, `/my-bookings`, `/admin`.
-- Cropped team image at `/assets/images/team-crop.jpg` (auto-cropped from user's mockup — shows all 3 women, no baked-in text).
-- Auth: register/login/logout/me with bcrypt + JWT + httpOnly cookies.
-- Bookings API with `payment_status`, `payment_id`, `razorpay_order_id`, `status`.
-- Admin can PATCH `/api/bookings/{id}/status` (requested/confirmed/completed/cancelled).
-- Razorpay integration scaffolded (`/api/payments/razorpay/config|order|verify`) — currently **not configured** (empty env keys). UI gracefully hides Pay Now when disabled.
-- Admin Dashboard: stat cards (requested/confirmed/completed/paid/revenue), search, status filter, inline status update per row.
-- My Bookings: upcoming vs history, Pay Now (visible when Razorpay is configured).
-- 20/20 backend pytest tests pass (`/app/backend/tests/backend_test.py`). Full Playwright UI verified.
+## Referral program
+- Every user gets a unique `GNG*` code on register.
+- Registering with a friend's code → 15% off first booking (auto-applied server-side).
+- Referrer credited ₹150 on the friend's first paid booking (or booking fully covered by credit).
+- Credit balance auto-applies on the next booking at checkout.
+
+## Reminders
+- APScheduler runs `_run_reminder_job` hourly.
+- Picks bookings where `date == tomorrow` and status ∈ [requested, confirmed] and reminder not yet queued.
+- Logs message + writes to `reminders_log` collection. Idempotent.
+- **SMS / WhatsApp provider is NOT wired yet** — hook up Twilio (or another provider) in `_run_reminder_job` when ready.
+
+## Routes
+- `/` — landing page (Home, Services, How It Works, Why, Trust, About, CTA, Contact)
+- `/my-bookings` — signed-in customer's bookings + credit balance + Refer CTA
+- `/admin` — admin-only booking control room + reminders panel + Run job button
+- `/refer` — share link, credit balance, list of referred friends
+
+## What's implemented
+- Modular React + React Router v7.
+- Team image auto-cropped from user's mockup (`/assets/images/team-crop.jpg`).
+- Auth: register/login/logout/me (bcrypt + JWT httpOnly cookies).
+- Referral: codes, discount, credit, /referrals/me, quotes.
+- Bookings API + status update.
+- Razorpay endpoints scaffolded (keys blank → graceful 503 + hidden Pay Now).
+- Reminder scheduler (hourly) + admin panel + Run-now button.
+- 31/31 backend pytest tests pass. Full Playwright UI verified.
 
 ## Test credentials
 - Admin: `admin@gngwar.com` / `Admin@GngWar2026`
-- Customer: create via UI or `user1@test.com` / `password123`
 
 ## Backlog
 ### P1 — needs user input
-- **Razorpay keys**: waiting on `RAZORPAY_KEY_ID` and `RAZORPAY_KEY_SECRET` (test mode is fine to start). Drop into backend/.env and restart backend.
+- **Razorpay keys** (`RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`) — drop into `/app/backend/.env`, restart backend.
+- **Twilio / MSG91 credentials** to actually send SMS/WhatsApp reminders.
 - **Real contact details** (phone/email/service area).
 
 ### P2
-- Password reset flow.
-- Email/SMS booking confirmation.
-- OTP mobile verification.
-- Pagination on `/api/bookings` + `/api/bookings/me`.
+- Wire actual SMS/WhatsApp send inside `_run_reminder_job`.
+- Password reset flow, OTP mobile verification.
+- Pagination on `/api/bookings`, `/api/bookings/me`, `/api/admin/reminders`.
 - Admin: audit trail for status changes.
-- Wire `CORS_ORIGINS` env or drop the dead branch.
+- Guard against concurrent double-credit in `_maybe_award_referrer` (use compound update matched_count check).
 
 ### P3
-- SEO metadata + OG tags.
+- Extract `server.py` (~780 lines) into `auth.py`, `referrals.py`, `payments.py`.
+- SEO metadata / OG tags.
 - Rate-limit login endpoint.
-- Optional-user FastAPI dependency (replace manual try/except in `create_booking`).
+- Handle date change of a booking → invalidate old queued reminder.
