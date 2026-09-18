@@ -1,0 +1,59 @@
+{
+  "app_name": "GngWar",
+  "tagline": "Your Home • Our Priority",
+  "app_type": "hybrid_fullstack",
+  "context": "Marketing and Booking Platform for Home Services",
+  "typography": {
+    "headings": "Outfit or Plus Jakarta Sans, font-bold, tracking-tight",
+    "body": "Inter or DM Sans, text-base, leading-relaxed",
+    "hierarchy_rules": {
+      "H1": "text-4xl sm:text-5xl lg:text-6xl tracking-tight font-extrabold",
+      "H2": "text-2xl sm:text-3xl lg:text-4xl tracking-tight font-bold",
+      "H3": "text-xl sm:text-2xl font-semibold",
+      "H4": "text-lg sm:text-xl font-medium"
+    }
+  },
+  "colors": {
+    "background": "#0F0F11",
+    "card_background": "#18181B",
+    "text_primary": "#FAFAFA",
+    "text_secondary": "#A1A1AA",
+    "accent_pink": "#F43F5E",
+    "accent_pink_hover": "#E11D48",
+    "border_color": "#27272A",
+    "neutral_gray": "#3F3F46"
+  },
+  "pricing_matrix": [
+    { "duration": "30 mins", "price": 75, "strikePrice": 86 },
+    { "duration": "45 mins", "price": 110, "strikePrice": 127 },
+    { "duration": "60 mins", "price": 149, "strikePrice": 171 },
+    { "duration": "90 mins", "price": 222, "strikePrice": 255 },
+    { "duration": "120 mins", "price": 296, "strikePrice": 340 },
+    { "duration": "180 mins", "price": 439, "strikePrice": 505 }
+  ],
+  "services_count": 12,
+  "key_features": [
+    "Sticky Navigation with brand GngWar & tagline",
+    "Hero section with dynamic quick service strip",
+    "12 Distinct Home Service Cards with interactive duration & pricing matrix (₹75/₹86 to ₹439/₹505)",
+    "Comprehensive Booking Modal with service selection, duration, pricing, customer details & local storage persistence",
+    "Confirmation Summary screen persisting bookings in browser localStorage",
+    "How it Works & Why choose GngWar sections",
+    "Trust badges & placeholder About / Contact sections",
+    "Hidden Login feature (hidden until backend connected)",
+    "Responsive mobile, tablet & desktop layout with solid dark header and backdrop blur"
+  ],
+  "image_urls": {
+    "placeholder_female_team": "/assets/images/team-placeholder.png"
+  },
+  "accessibility_and_testing": {
+    "data_testid_convention": "kebab-case role-based testids on all interactive and key informational elements",
+    "contrast_standard": "WCAG AA compliant dark theme contrast"
+  },
+  "universal_guidelines": [
+    "Never use full transparent backgrounds in headers without backdrop-blur and solid tint",
+    "Include data-testid on all interactive and informational elements",
+    "Ensure all 12 services have access to all 6 duration/price pairs",
+    "Store bookings in localStorage and display summary confirmation on completion"
+  ]
+}
